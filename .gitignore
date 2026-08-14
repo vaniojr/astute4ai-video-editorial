@@ -1,0 +1,25 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# macOS
+.DS_Store
+
+# Secrets
+.env
+*.cookies.txt
+
+# Media
+projetos/*/original/*
+projetos/*/audio/*
+projetos/*/cortes/*
+projetos/*/logs/*
+
+*.mp4
+*.mov
+*.mkv
+*.webm
+*.wav
+*.mp3
