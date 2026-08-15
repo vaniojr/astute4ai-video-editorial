@@ -4,7 +4,21 @@ Histórico do que foi entregue, em ordem cronológica (mais recente primeiro).
 Formato inspirado em [Keep a Changelog](https://keepachangelog.com/) — o
 "o quê" de cada mudança relevante, não um registro linha a linha de código.
 Para o "porquê" de decisões específicas, veja a mensagem do commit
-correspondente (`git show <hash>`) ou o `PRD_Video_Editorial*.md` da época.
+correspondente (`git show <hash>`) ou o `docs/PRD_Video_Editorial*.md` da
+época. Para um resumo por versão (menos técnico), veja
+[RELEASE_NOTES.md](RELEASE_NOTES.md).
+
+## 2026-08-15 — Organização da documentação + release notes
+
+- `PRD_Video_Editorial.md` e `PRD_Video_Editorial_plus_analyses.md` movidos
+  para `docs/` (documentos "fechados" — MVP e Fase A entregues). O terceiro
+  PRD (`PRD_Video_Editorial_plus_thumbnail.md`) continua na raiz, fora do
+  git, por ainda não ter sido iniciado.
+- Novo [docs/RELEASE_NOTES.md](RELEASE_NOTES.md): resumo em destaques por
+  versão, para leitura rápida — complementa o CHANGELOG (que mantém o
+  detalhe técnico por commit).
+- `pyproject.toml` passa a refletir a versão atual (`0.2.0`, correspondente
+  aos destaques já entregues).
 
 ## 2026-08-15 — Logs completos + feedback em tempo real (`ca3847a`)
 

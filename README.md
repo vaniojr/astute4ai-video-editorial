@@ -1,15 +1,16 @@
 # Video Editorial
 
 Ferramenta local para apoiar a produção editorial de vídeos longos, podcasts
-e lives. Veja `PRD_Video_Editorial.md` para a visão completa do produto.
+e lives. Veja `docs/PRD_Video_Editorial.md` para a visão completa do produto.
 
 Status atual: pipeline completo da Fase 1 do PRD (`init`, `download`,
 `audio`, `transcribe`, `cut`, `status`) mais a automação da análise
 editorial via LLM (`analyze`, Fase A — ver
-`PRD_Video_Editorial_plus_analyses.md`). Veja
-[docs/PIPELINE.md](docs/PIPELINE.md) para o passo a passo de ponta a ponta
-e [docs/CHANGELOG.md](docs/CHANGELOG.md) para o histórico do que foi
-entregue em cada etapa.
+[docs/PRD_Video_Editorial_plus_analyses.md](docs/PRD_Video_Editorial_plus_analyses.md)).
+Veja [docs/PIPELINE.md](docs/PIPELINE.md) para o passo a passo de ponta a
+ponta, [docs/RELEASE_NOTES.md](docs/RELEASE_NOTES.md) para os destaques de
+cada versão e [docs/CHANGELOG.md](docs/CHANGELOG.md) para o histórico
+detalhado do que foi entregue em cada etapa.
 
 ## Setup
 
