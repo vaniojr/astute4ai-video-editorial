@@ -4,6 +4,7 @@ from datetime import date
 from typer.testing import CliRunner
 
 from app import project as project_module
+from app.audio import AudioError, AudioResult
 from app.downloader import DownloadError, DownloadResult
 from app.metadata import MetadataError, VideoMetadata
 from cli import main as cli_main
@@ -125,5 +126,63 @@ def test_download_reports_project_not_found(tmp_path, monkeypatch):
     monkeypatch.setenv("VIDEO_EDITORIAL_PROJETOS_DIR", str(tmp_path / "projetos"))
 
     result = runner.invoke(app, ["download", "nao-existe"])
+
+    assert result.exit_code == 1
+
+
+def test_audio_creates_file_and_updates_status(tmp_path, monkeypatch):
+    project_dir = _create_project(tmp_path, monkeypatch)
+
+    def _fake_extract(pdir, force=False):
+        final = pdir / "audio" / "audio.wav"
+        final.parent.mkdir(parents=True, exist_ok=True)
+        final.write_bytes(b"fake wav bytes")
+        return AudioResult(path=final, skipped=False)
+
+    monkeypatch.setattr(cli_main, "extract_audio", _fake_extract)
+
+    result = runner.invoke(app, ["audio", str(project_dir)])
+
+    assert result.exit_code == 0
+    assert "Áudio extraído" in result.stdout
+    data = json.loads((project_dir / "project.json").read_text(encoding="utf-8"))
+    assert data["status"] == "audio_ready"
+
+
+def test_audio_reports_existing_file_without_changing_status(tmp_path, monkeypatch):
+    project_dir = _create_project(tmp_path, monkeypatch)
+
+    def _fake_extract(pdir, force=False):
+        final = pdir / "audio" / "audio.wav"
+        return AudioResult(path=final, skipped=True)
+
+    monkeypatch.setattr(cli_main, "extract_audio", _fake_extract)
+
+    result = runner.invoke(app, ["audio", str(project_dir)])
+
+    assert result.exit_code == 0
+    assert "Arquivo de áudio já existe." in result.stdout
+    assert "Nenhuma extração realizada." in result.stdout
+    data = json.loads((project_dir / "project.json").read_text(encoding="utf-8"))
+    assert data["status"] == "created"
+
+
+def test_audio_reports_extraction_errors(tmp_path, monkeypatch):
+    project_dir = _create_project(tmp_path, monkeypatch)
+
+    def _raise(pdir, force=False):
+        raise AudioError("mensagem acionável")
+
+    monkeypatch.setattr(cli_main, "extract_audio", _raise)
+
+    result = runner.invoke(app, ["audio", str(project_dir)])
+
+    assert result.exit_code == 1
+
+
+def test_audio_reports_project_not_found(tmp_path, monkeypatch):
+    monkeypatch.setenv("VIDEO_EDITORIAL_PROJETOS_DIR", str(tmp_path / "projetos"))
+
+    result = runner.invoke(app, ["audio", "nao-existe"])
 
     assert result.exit_code == 1

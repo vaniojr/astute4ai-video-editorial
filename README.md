@@ -3,9 +3,9 @@
 Ferramenta local para apoiar a produção editorial de vídeos longos, podcasts
 e lives. Veja `PRD_Video_Editorial.md` para a visão completa do produto.
 
-Status atual: **Entrega 2 — Download**. Criação de projetos (`init`) e
-download do vídeo original (`download`) estão implementados. Áudio,
-transcrição, análise e cortes pertencem a entregas futuras.
+Status atual: **Entrega 3 — Áudio**. Criação de projetos (`init`), download
+do vídeo original (`download`) e extração de áudio (`audio`) estão
+implementados. Transcrição, análise e cortes pertencem a entregas futuras.
 
 ## Setup
 
@@ -41,6 +41,15 @@ quando executado de dentro do projeto).
 
 Se o arquivo já existir, nenhum download é refeito — use `--force` para
 baixar novamente e substituir o arquivo existente.
+
+```bash
+uv run video-editorial audio "projetos/2026-08-12_slug_ID"
+```
+
+Extrai o áudio do vídeo original (mono, 16 kHz, WAV) para `audio/audio.wav`,
+usando `ffmpeg`/`ffprobe`. Requer que o vídeo já tenha sido baixado
+(`download`). Também é idempotente por padrão — use `--force` para
+reextrair. O arquivo é derivado e descartável.
 
 ## Testes
 
