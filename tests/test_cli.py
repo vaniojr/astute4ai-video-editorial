@@ -7,6 +7,7 @@ from app import project as project_module
 from app.audio import AudioError, AudioResult
 from app.downloader import DownloadError, DownloadResult
 from app.metadata import MetadataError, VideoMetadata
+from app.transcriber import TranscribeResult, TranscriptionError
 from cli import main as cli_main
 from cli.main import app
 
@@ -184,5 +185,65 @@ def test_audio_reports_project_not_found(tmp_path, monkeypatch):
     monkeypatch.setenv("VIDEO_EDITORIAL_PROJETOS_DIR", str(tmp_path / "projetos"))
 
     result = runner.invoke(app, ["audio", "nao-existe"])
+
+    assert result.exit_code == 1
+
+
+def test_transcribe_creates_files_and_updates_status(tmp_path, monkeypatch):
+    project_dir = _create_project(tmp_path, monkeypatch)
+
+    def _fake_transcribe(pdir, settings, force=False):
+        md_path = pdir / "02 Transcricao.md"
+        json_path = pdir / "transcricao.json"
+        md_path.write_text("# Transcrição", encoding="utf-8")
+        json_path.write_text("{}", encoding="utf-8")
+        return TranscribeResult(md_path=md_path, json_path=json_path, skipped=False)
+
+    monkeypatch.setattr(cli_main, "transcribe_project", _fake_transcribe)
+
+    result = runner.invoke(app, ["transcribe", str(project_dir)])
+
+    assert result.exit_code == 0
+    assert "Transcrição concluída" in result.stdout
+    data = json.loads((project_dir / "project.json").read_text(encoding="utf-8"))
+    assert data["status"] == "transcribed"
+
+
+def test_transcribe_reports_existing_file_without_changing_status(tmp_path, monkeypatch):
+    project_dir = _create_project(tmp_path, monkeypatch)
+
+    def _fake_transcribe(pdir, settings, force=False):
+        return TranscribeResult(
+            md_path=pdir / "02 Transcricao.md", json_path=pdir / "transcricao.json", skipped=True
+        )
+
+    monkeypatch.setattr(cli_main, "transcribe_project", _fake_transcribe)
+
+    result = runner.invoke(app, ["transcribe", str(project_dir)])
+
+    assert result.exit_code == 0
+    assert "Transcrição já existe." in result.stdout
+    assert "Nenhuma transcrição realizada." in result.stdout
+    data = json.loads((project_dir / "project.json").read_text(encoding="utf-8"))
+    assert data["status"] == "created"
+
+
+def test_transcribe_reports_transcription_errors(tmp_path, monkeypatch):
+    project_dir = _create_project(tmp_path, monkeypatch)
+
+    def _raise(pdir, settings, force=False):
+        raise TranscriptionError("mensagem acionável")
+
+    monkeypatch.setattr(cli_main, "transcribe_project", _raise)
+
+    result = runner.invoke(app, ["transcribe", str(project_dir)])
+
+    assert result.exit_code == 1
+
+
+def test_transcribe_reports_project_not_found(tmp_path, monkeypatch):
+    monkeypatch.setenv("VIDEO_EDITORIAL_PROJETOS_DIR", str(tmp_path / "projetos"))
+
+    result = runner.invoke(app, ["transcribe", "nao-existe"])
 
     assert result.exit_code == 1

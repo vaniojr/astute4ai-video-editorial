@@ -7,6 +7,7 @@ from app.config import load_settings
 from app.downloader import DownloadError, download_video
 from app.metadata import MetadataError
 from app.project import ProjectNotFoundError, create_project, load_project, resolve_project_dir, update_status
+from app.transcriber import TranscriptionError, transcribe_project
 
 app = typer.Typer(help="Ferramenta local para produção editorial de vídeos.")
 
@@ -99,6 +100,35 @@ def audio(
     update_status(project_dir, "audio_ready")
     typer.echo("Áudio extraído:\n")
     typer.echo(str(result.path))
+
+
+@app.command()
+def transcribe(
+    project: str = typer.Argument(..., help="Nome do diretório em projetos/ ou caminho do projeto."),
+    force: bool = typer.Option(False, "--force", help="Forçar nova transcrição mesmo se já existir."),
+) -> None:
+    """Transcreve o áudio de um projeto, preservando timestamps."""
+    settings = load_settings()
+    try:
+        project_dir = resolve_project_dir(project, settings)
+    except ProjectNotFoundError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1)
+
+    try:
+        result = transcribe_project(project_dir, settings, force=force)
+    except TranscriptionError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1)
+
+    if result.skipped:
+        typer.echo("Transcrição já existe.")
+        typer.echo("Nenhuma transcrição realizada.")
+        return
+
+    update_status(project_dir, "transcribed")
+    typer.echo("Transcrição concluída:\n")
+    typer.echo(str(result.md_path))
 
 
 if __name__ == "__main__":
