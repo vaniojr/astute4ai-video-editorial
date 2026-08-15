@@ -8,7 +8,7 @@ from app import ffmpeg_utils as ffmpeg_utils_module
 from app.brands import Brand, BrandAssets, BrandColors, BrandFeatures, BrandThumbnailConfig, BrandVideoConfig
 from app.config import Settings
 from app.editorial_models import Cta, EditorialPlan, Intro, SourceAttribution
-from app.editorial_renderer import EditorialRenderError, render_editorial_video
+from app.editorial_renderer import EditorialRenderError, _wrap_text, render_editorial_video
 
 
 def _settings(tmp_path):
@@ -194,3 +194,24 @@ def test_render_raises_on_ffmpeg_failure(tmp_path, monkeypatch):
     with pytest.raises(EditorialRenderError) as exc_info:
         render_editorial_video(_plan(), cut_path, _brand(tmp_path), output_path, settings)
     assert "erro de filtro" in str(exc_info.value)
+
+
+def test_wrap_text_preserves_explicit_line_breaks():
+    # Bug real encontrado na validação manual: textwrap.wrap() sozinho
+    # colapsava o \n proposital do brand.video.cta_text (ex.: "CANAL DE
+    # TESTE\nCurta e compartilhe") numa linha só antes de re-quebrar.
+    result = _wrap_text("CANAL DE TESTE\nCurta e compartilhe")
+    assert result == "CANAL DE TESTE\nCurta e compartilhe"
+
+
+def test_wrap_text_wraps_long_lines_within_each_paragraph():
+    long_line = "palavra " * 20
+    result = _wrap_text(f"Primeira linha curta\n{long_line}")
+    lines = result.split("\n")
+    assert lines[0] == "Primeira linha curta"
+    assert len(lines) > 2
+    assert all(len(line) <= 40 for line in lines)
+
+
+def test_wrap_text_returns_original_when_empty():
+    assert _wrap_text("") == ""

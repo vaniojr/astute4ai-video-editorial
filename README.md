@@ -256,12 +256,21 @@ futura).
   fonte, são pulados com um aviso claro — o comando **nunca falha só por
   isso**, o corte ainda vira um `final/*.mp4` válido (só que sem os
   cards de texto). Nenhuma marca vem com fonte configurada por padrão.
-- **O `drawtext` do FFmpeg precisa de suporte a `libfreetype`.** O
-  `ffmpeg` instalado via `brew install ffmpeg` no macOS pode não incluir
-  esse filtro (`ffmpeg -filters | grep drawtext` mostra se está
-  disponível) — sem ele, o render com intro/CTA falha com "No such
-  filter: 'drawtext'" mesmo com fonte configurada. Precisa de um build
-  do FFmpeg compilado com `--enable-libfreetype`.
+- **O `drawtext` do FFmpeg precisa de suporte a `libfreetype`/`fontconfig`,
+  que o formula padrão `ffmpeg` do Homebrew não inclui** (`ffmpeg -filters
+  | grep drawtext` mostra se está disponível) — sem isso, o render com
+  intro/CTA falha com "No such filter: 'drawtext'" mesmo com fonte
+  configurada. Correção no macOS:
+
+  ```bash
+  brew install ffmpeg-full
+  brew unlink ffmpeg
+  brew link --overwrite ffmpeg-full
+  ```
+
+  O `ffmpeg-full` é um superset do formula padrão (mesmos codecs +
+  `libfreetype`/`fontconfig`/`libass` e outros) — `ffmpeg`/`ffprobe` no
+  PATH passam a apontar para ele, sem precisar mudar nada no projeto.
 - Exige que um plano editorial já exista (`editorialize` já ter rodado).
 - `--dry-run`: mostra corte/plano usado/se intro e CTA entram/se a marca
   tem fonte configurada/arquivo final previsto — **sem chamar o

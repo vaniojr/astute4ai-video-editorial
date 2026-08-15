@@ -8,6 +8,23 @@ correspondente (`git show <hash>`) ou o `docs/PRD_Video_Editorial*.md` da
 época. Para um resumo por versão (menos técnico), veja
 [RELEASE_NOTES.md](RELEASE_NOTES.md).
 
+## 2026-08-15 — Ambiente: FFmpeg com suporte a `drawtext` + correção de quebra de linha
+
+- Resolvida a limitação apontada na entrega anterior: o `ffmpeg` do
+  Homebrew (formula padrão) não inclui `libfreetype`/`fontconfig`, então
+  `render` falhava com "No such filter: 'drawtext'" mesmo com fonte
+  configurada. Corrigido trocando para o formula `ffmpeg-full` (mesmos
+  codecs + `libfreetype`/`fontconfig`/`libass`), documentado no README.
+- **Bug real encontrado na validação manual** (só aparece com FFmpeg de
+  verdade, não em mock): `_wrap_text()` usava `textwrap.wrap()` direto,
+  que colapsa quebras de linha (`\n`) já existentes no texto antes de
+  re-quebrar por largura — uma marca com `cta_text` configurado com
+  quebra de linha proposital (ex.: `"CANAL\nCurta e compartilhe"`) saía
+  renderizada numa linha só. Corrigido em `app/editorial_renderer.py`
+  para quebrar parágrafo por parágrafo, preservando `\n` explícitos.
+  Confirmado visualmente com frame extraído do vídeo renderizado antes/
+  depois da correção.
+
 ## 2026-08-15 — Entrega 8.2: Editorial — Renderer mínimo (intro + corte + CTA)
 
 - Novo comando `video-editorial render PROJECT --chapter N [--version N]`:

@@ -236,7 +236,19 @@ def _append_text_card_inputs(
 
 
 def _wrap_text(text: str) -> str:
-    return "\n".join(textwrap.wrap(text, width=_WRAP_CHARS)) or text
+    """Quebra linhas longas por largura, preservando quebras de linha já existentes.
+
+    `textwrap.wrap()` sozinho colapsa `\\n` já presentes no texto (ex.:
+    `brand.video.cta_text` configurado com quebra de linha proposital) antes
+    de re-quebrar por largura — por isso quebramos parágrafo por parágrafo.
+    """
+    lines = []
+    for paragraph in text.split("\n"):
+        if paragraph.strip():
+            lines.extend(textwrap.wrap(paragraph, width=_WRAP_CHARS))
+        else:
+            lines.append("")
+    return "\n".join(lines) if lines else text
 
 
 def _to_ffmpeg_color(hex_color: Optional[str], *, default: str) -> str:
