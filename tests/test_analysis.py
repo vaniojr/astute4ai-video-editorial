@@ -4,6 +4,7 @@ from dataclasses import dataclass
 import pytest
 
 from app import analysis as analysis_module
+from app import ffmpeg_utils as ffmpeg_utils_module
 from app.analysis import (
     AnalysisError,
     AnalysisRow,
@@ -12,6 +13,7 @@ from app.analysis import (
     classify_action,
     filter_chapters,
     load_analysis,
+    select_single_chapter,
     write_analysis_csv,
 )
 
@@ -120,8 +122,8 @@ def _fake_ffprobe(monkeypatch, duration_seconds):
     def _fake_run(cmd, capture_output=True, text=True):
         return _FakeCompletedProcess(returncode=0, stdout=str(duration_seconds))
 
-    monkeypatch.setattr(analysis_module.subprocess, "run", _fake_run)
-    monkeypatch.setattr(analysis_module.shutil, "which", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr(ffmpeg_utils_module.subprocess, "run", _fake_run)
+    monkeypatch.setattr(ffmpeg_utils_module.shutil, "which", lambda name: f"/usr/bin/{name}")
 
 
 def _make_project(tmp_path, csv_rows=None, headers=_HEADERS):
@@ -165,12 +167,12 @@ def test_build_dry_run_report_raises_when_ffprobe_missing(tmp_path, monkeypatch)
             ),
         ],
     )
-    monkeypatch.setattr(analysis_module.shutil, "which", lambda name: None)
+    monkeypatch.setattr(ffmpeg_utils_module.shutil, "which", lambda name: None)
 
     def _fail_if_called(cmd, capture_output=True, text=True):
         raise AssertionError("ffprobe não deveria ser chamado")
 
-    monkeypatch.setattr(analysis_module.subprocess, "run", _fail_if_called)
+    monkeypatch.setattr(ffmpeg_utils_module.subprocess, "run", _fail_if_called)
 
     with pytest.raises(AnalysisError) as exc_info:
         build_dry_run_report(project_dir)
@@ -451,6 +453,24 @@ def test_filter_chapters_combines_filters_with_and():
 def test_filter_chapters_by_chapter_ignores_non_numeric_capitulo():
     chapters = [_chapter(capitulo="abc")]
     assert filter_chapters(chapters, chapter=8) == []
+
+
+def test_select_single_chapter_returns_the_one_match():
+    chapters = [_chapter(capitulo="8"), _chapter(capitulo="14")]
+    result = select_single_chapter(chapters, chapter=8)
+    assert result.row.capitulo == "8"
+
+
+def test_select_single_chapter_raises_when_no_match():
+    chapters = [_chapter(capitulo="8")]
+    with pytest.raises(AnalysisError):
+        select_single_chapter(chapters, chapter=99)
+
+
+def test_select_single_chapter_raises_when_multiple_matches():
+    chapters = [_chapter(capitulo="8", prioridade="A"), _chapter(capitulo="8", prioridade="B")]
+    with pytest.raises(AnalysisError):
+        select_single_chapter(chapters, chapter=8)
 
 
 def test_write_analysis_csv_round_trips_through_load_analysis(tmp_path):

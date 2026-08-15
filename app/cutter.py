@@ -5,14 +5,14 @@ Reaproveita a validação de `app/analysis.py` (só corta linhas com
 simplesmente puladas aqui — a falha de uma linha nunca aborta as demais.
 """
 
-import shutil
-import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, List, Optional
 
 from app.analysis import ChapterReport, DryRunReport
 from app.config import Settings
+from app.ffmpeg_utils import INSTALL_HINT as FFMPEG_INSTALL_HINT
+from app.ffmpeg_utils import is_binary_available, run as run_ffmpeg_binary, truncate_stderr
 from app.slug import slugify
 
 _MODES = ("precise", "fast")
@@ -50,12 +50,8 @@ def generate_cuts(
     if mode not in _MODES:
         raise CutterError(f"Modo inválido: '{mode}'. Use 'precise' ou 'fast'.")
 
-    if shutil.which("ffmpeg") is None:
-        raise CutterError(
-            "FFmpeg não foi encontrado.\n\n"
-            "Instale no macOS:\n\n"
-            "brew install ffmpeg"
-        )
+    if not is_binary_available("ffmpeg"):
+        raise CutterError(f"FFmpeg não foi encontrado.\n\n{FFMPEG_INSTALL_HINT}")
 
     cortes_dir = project_dir / "cortes"
     cortes_dir.mkdir(parents=True, exist_ok=True)
@@ -67,7 +63,7 @@ def generate_cuts(
             continue
 
         try:
-            filename = _build_filename(chapter.row, settings)
+            filename = build_cut_filename(chapter.row, settings)
         except CutterError as exc:
             outcomes.append(CutOutcome(chapter=chapter, status="error", message=str(exc)))
             continue
@@ -100,7 +96,12 @@ def generate_cuts(
     return CutRunResult(outcomes=outcomes)
 
 
-def _build_filename(row, settings: Settings) -> str:
+def build_cut_filename(row, settings: Settings) -> str:
+    """Nome de arquivo de um corte a partir de Ordem Publicacao/Capitulo/Titulo.
+
+    Público para ser reaproveitado por `app/chapter_status.py` — mesma
+    convenção de nome usada aqui não pode ser duplicada em outro lugar.
+    """
     try:
         ordem = int(row.ordem_publicacao)
     except (TypeError, ValueError):
@@ -156,8 +157,8 @@ def _run_ffmpeg_cut(
         str(output_path),
     ]
 
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    result = run_ffmpeg_binary(cmd)
     if result.returncode != 0:
         raise CutterError(
-            f"FFmpeg falhou ao gerar '{output_path.name}':\n\n{result.stderr.strip()[-2000:]}"
+            f"FFmpeg falhou ao gerar '{output_path.name}':\n\n{truncate_stderr(result.stderr)}"
         )

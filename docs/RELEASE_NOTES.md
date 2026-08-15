@@ -4,6 +4,20 @@ Resumo em destaques do que cada versão trouxe, pensado para leitura rápida —
 "o que dá pra fazer agora que não dava antes". Para detalhe técnico
 (arquivos, commits, decisões), veja [CHANGELOG.md](CHANGELOG.md).
 
+## v0.3.0 — 2026-08-15
+
+- **Brand Profile**: todo projeto agora tem uma identidade de marca
+  explícita (`generic` ou `bussola-politica`, escolhida com
+  `init URL --brand <slug>` ou por um default configurável) — base para as
+  próximas features de editorialização automática e geração de thumbnails,
+  que vão usar a mesma marca sem duplicar configuração.
+- **`status` por capítulo**: além do resumo geral do projeto, agora mostra
+  quais capítulos do `03 Analise.csv` já têm corte gerado.
+- Preparação interna (sem mudança de comportamento visível): convenção
+  única de versionamento de arquivos e utilitários de FFmpeg
+  compartilhados, para as próximas entregas não reimplementarem cada uma a
+  sua própria versão.
+
 ## v0.2.0 — 2026-08-15
 
 - **Análise editorial automática via IA**: novo comando `analyze` gera

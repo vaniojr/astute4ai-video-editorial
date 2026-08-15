@@ -4,13 +4,14 @@ Ferramenta local para apoiar a produção editorial de vídeos longos, podcasts
 e lives. Veja `docs/PRD_Video_Editorial.md` para a visão completa do produto.
 
 Status atual: pipeline completo da Fase 1 do PRD (`init`, `download`,
-`audio`, `transcribe`, `cut`, `status`) mais a automação da análise
-editorial via LLM (`analyze`, Fase A — ver
-[docs/PRD_Video_Editorial_plus_analyses.md](docs/PRD_Video_Editorial_plus_analyses.md)).
-Veja [docs/PIPELINE.md](docs/PIPELINE.md) para o passo a passo de ponta a
-ponta, [docs/RELEASE_NOTES.md](docs/RELEASE_NOTES.md) para os destaques de
-cada versão e [docs/CHANGELOG.md](docs/CHANGELOG.md) para o histórico
-detalhado do que foi entregue em cada etapa.
+`audio`, `transcribe`, `cut`, `status`), automação da análise editorial via
+LLM (`analyze`, Fase A) e a Fundação compartilhada (Entrega 8.0) para as
+próximas features de editorialização e thumbnail — Brand Profile,
+versionamento e status por capítulo. Veja
+[docs/PIPELINE.md](docs/PIPELINE.md) para o passo a passo de ponta a ponta,
+[docs/RELEASE_NOTES.md](docs/RELEASE_NOTES.md) para os destaques de cada
+versão e [docs/CHANGELOG.md](docs/CHANGELOG.md) para o histórico detalhado
+do que foi entregue em cada etapa.
 
 ## Setup
 
@@ -30,15 +31,39 @@ ser commitado normalmente.
 
 ```bash
 uv run video-editorial init "https://www.youtube.com/watch?v=VIDEO_ID"
+uv run video-editorial init "https://www.youtube.com/watch?v=VIDEO_ID" --brand bussola-politica
 ```
 
 Isso consulta os metadados do vídeo (via `yt-dlp`, sem baixar o arquivo),
 cria um diretório único em `projetos/` no formato `YYYY-MM-DD_slug_ID` e
 gera `project.json` e `01 Fonte.md`.
 
+Todo projeto tem um **Brand Profile** (`project.json` sempre grava um
+`"brand"`, nunca vazio) — `--brand` escolhe qual; sem a flag, usa o default
+da aplicação (`VIDEO_EDITORIAL_DEFAULT_BRAND`, padrão `generic`). Ver seção
+"Brand Profile" abaixo.
+
 Executar novamente com a mesma URL não cria um projeto duplicado — a
 ferramenta identifica o projeto existente pelo ID do vídeo e apenas informa
 o caminho.
+
+### Brand Profile
+
+Cada profile fica em `brands/<slug>/brand.toml` (+ `brands/<slug>/assets/`
+para logo/intro/outro, quando existirem). Vêm prontos:
+
+- `generic` — sem identidade de marca, todos os recursos (logo/CTA/intro/
+  outro) desligados. Default da aplicação.
+- `bussola-politica` — cores e CTA configurados; logo/intro/outro ficam
+  desligados até os arquivos reais serem adicionados em
+  `brands/bussola-politica/assets/`.
+
+Cada recurso (`logo_enabled`, `cta_enabled`, etc.) só pode ficar `true` se
+a configuração correspondente existir — `video-editorial init` recusa a
+marca (listando as disponíveis) se `--brand` não corresponder a nenhum
+diretório em `brands/`. Editorialização e thumbnail (próximas entregas)
+vão ler o mesmo profile via `app/brands.py`, nunca duplicando a leitura do
+`brand.toml`.
 
 ```bash
 uv run video-editorial download "projetos/2026-08-12_slug_ID"
@@ -189,10 +214,13 @@ avisam quando o trabalho pesado está começando.
 uv run video-editorial status "projetos/2026-08-12_slug_ID"
 ```
 
-Mostra título, canal, URL, o `status` atual do pipeline (`created` →
-`downloaded` → `audio_ready` → `transcribed` → `analyzed` → `cut`) e quais
-artefatos já existem (vídeo original, áudio, transcrição, `03 Analise.csv`,
-quantidade de arquivos em `cortes/`).
+Mostra título, canal, URL, Brand Profile, o `status` atual do pipeline
+(`created` → `downloaded` → `audio_ready` → `transcribed` → `analyzed` →
+`cut`) e quais artefatos já existem (vídeo original, áudio, transcrição,
+`03 Analise.csv`, quantidade de arquivos em `cortes/`). Se `03 Analise.csv`
+já existir, mostra também uma quebra por capítulo elegível (`Manter`) —
+por ora só se o corte já foi gerado; editorialização/thumbnail entram
+nessa mesma lista nas próximas entregas.
 
 ## Testes
 

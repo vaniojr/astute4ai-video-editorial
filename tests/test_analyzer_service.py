@@ -7,6 +7,7 @@ import pytest
 
 import app.analysis as analysis_module
 import app.analyzer as analyzer_module
+import app.ffmpeg_utils as ffmpeg_utils_module
 from app.analyzer import (
     AnalysisProvider,
     AnalysisRequest,
@@ -32,6 +33,8 @@ def _settings(tmp_path):
         analysis_provider="claude",
         analysis_model="claude-sonnet-5",
         analysis_temperature=0.0,
+        default_brand="generic",
+        brands_dir=tmp_path / "brands",
     )
 
 
@@ -76,8 +79,8 @@ def _fake_ffprobe(monkeypatch, duration_seconds=6303.0):
     def _fake_run(cmd, capture_output=True, text=True):
         return _FakeCompletedProcess(returncode=0, stdout=str(duration_seconds))
 
-    monkeypatch.setattr(analysis_module.subprocess, "run", _fake_run)
-    monkeypatch.setattr(analysis_module.shutil, "which", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr(ffmpeg_utils_module.subprocess, "run", _fake_run)
+    monkeypatch.setattr(ffmpeg_utils_module.shutil, "which", lambda name: f"/usr/bin/{name}")
 
 
 class _FakeProvider(AnalysisProvider):

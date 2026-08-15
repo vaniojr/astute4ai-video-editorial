@@ -1,0 +1,27 @@
+[brand]
+slug = "generic"
+name = "Genérico"
+
+[colors]
+primary = "#FFFFFF"
+background = "#000000"
+text = "#FFFFFF"
+accent = "#888888"
+
+[typography]
+
+[features]
+logo_enabled = false
+intro_enabled = false
+outro_enabled = false
+cta_enabled = false
+source_attribution_enabled = false
+
+[assets]
+
+[video]
+
+[thumbnail]
+width = 1280
+height = 720
+style = "neutral"

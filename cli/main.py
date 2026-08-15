@@ -18,6 +18,8 @@ from app.analysis import (
 )
 from app.analyzer import AnalysisServiceError, analyze_project, plan_analysis
 from app.audio import AudioError, extract_audio
+from app.brands import BrandNotFoundError
+from app.chapter_status import get_chapter_statuses
 from app.config import load_settings
 from app.cutter import CutRunResult, CutterError, generate_cuts
 from app.downloader import DownloadError, download_video
@@ -49,14 +51,25 @@ def _callback() -> None:
 
 
 @app.command()
-def init(url: str = typer.Argument(..., help="URL do vídeo de origem (ex.: YouTube).")) -> None:
+def init(
+    url: str = typer.Argument(..., help="URL do vídeo de origem (ex.: YouTube)."),
+    brand: Optional[str] = typer.Option(
+        None,
+        "--brand",
+        help="Brand Profile do projeto (ex.: generic, bussola-politica). Padrão: configuração da aplicação.",
+    ),
+) -> None:
     """Cria um novo projeto a partir de uma URL de vídeo."""
     # Sem log_operation aqui: o diretório do projeto (onde logs/pipeline.log
     # mora) só existe DEPOIS que create_project() já terminou — não há onde
     # gravar um "iniciado" antes disso. Registra só o resultado final.
+    settings = load_settings()
     start = time.monotonic()
     try:
-        result = create_project(url)
+        result = create_project(url, settings, brand=brand)
+    except BrandNotFoundError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1)
     except MetadataError as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(code=1)
@@ -89,6 +102,7 @@ def init(url: str = typer.Argument(..., help="URL do vídeo de origem (ex.: YouT
     typer.echo("")
     typer.echo(f"Título: {project.title}")
     typer.echo(f"Canal: {project.channel or '(não detectado)'}")
+    typer.echo(f"Brand: {project.brand}")
     if project.duration_seconds is not None:
         typer.echo(f"Duração: {project.duration_seconds} segundos")
 
@@ -390,6 +404,7 @@ def status(
     typer.echo(f"Título: {proj.title}")
     typer.echo(f"Canal: {proj.channel or '(não detectado)'}")
     typer.echo(f"URL: {proj.source_url}")
+    typer.echo(f"Brand: {proj.brand}")
     typer.echo(f"Status: {proj.status}")
     typer.echo("")
     typer.echo("Artefatos:")
@@ -400,6 +415,14 @@ def status(
     cortes_dir = project_dir / "cortes"
     cortes_count = len(list(cortes_dir.glob("*.mp4"))) if cortes_dir.is_dir() else 0
     typer.echo(f"- Cortes: {cortes_count} arquivo(s) em cortes/")
+
+    chapter_statuses = get_chapter_statuses(project_dir, settings)
+    if chapter_statuses:
+        typer.echo("")
+        typer.echo("Por capítulo:")
+        for chapter in chapter_statuses:
+            marca = "✓" if chapter.cut else "✗"
+            typer.echo(f"- Capítulo {chapter.capitulo}: cut {marca}")
 
 
 def _presence(path: Path) -> str:

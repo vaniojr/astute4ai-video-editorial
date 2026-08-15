@@ -1,0 +1,28 @@
+[brand]
+slug = "bussola-politica"
+name = "Bússola Política"
+
+[colors]
+primary = "#F5C400"
+background = "#090909"
+text = "#FFFFFF"
+accent = "#C92020"
+
+[typography]
+
+[features]
+logo_enabled = false
+intro_enabled = false
+outro_enabled = false
+cta_enabled = true
+source_attribution_enabled = true
+
+[assets]
+
+[video]
+cta_text = "BÚSSOLA POLÍTICA\nCurta • Comente • Compartilhe • Inscreva-se"
+
+[thumbnail]
+width = 1280
+height = 720
+style = "political-editorial"

@@ -2,6 +2,7 @@ import json
 from datetime import date
 
 from app import project as project_module
+from app.brands import BrandNotFoundError
 from app.config import Settings
 from app.metadata import VideoMetadata
 from app.project import (
@@ -15,7 +16,17 @@ from app.project import (
 )
 
 
-def _settings(tmp_path):
+def _write_brand(brands_dir, slug, *, name="Genérico"):
+    brand_dir = brands_dir / slug
+    brand_dir.mkdir(parents=True, exist_ok=True)
+    (brand_dir / "brand.toml").write_text(
+        f'[brand]\nslug = "{slug}"\nname = "{name}"\n', encoding="utf-8"
+    )
+
+
+def _settings(tmp_path, default_brand="generic"):
+    brands_dir = tmp_path / "brands"
+    _write_brand(brands_dir, "generic")
     return Settings(
         projetos_dir=tmp_path / "projetos",
         whisper_model="medium",
@@ -28,6 +39,8 @@ def _settings(tmp_path):
         analysis_provider="claude",
         analysis_model="claude-sonnet-5",
         analysis_temperature=0.0,
+        default_brand=default_brand,
+        brands_dir=brands_dir,
     )
 
 
@@ -73,11 +86,12 @@ def test_create_project_writes_project_json(tmp_path, monkeypatch):
     result = create_project("https://www.youtube.com/watch?v=7xgE4ZHNWRU", settings)
 
     data = json.loads((result.path / "project.json").read_text(encoding="utf-8"))
-    assert data["schema_version"] == 1
+    assert data["schema_version"] == 2
     assert data["source_id"] == "7xgE4ZHNWRU"
     assert data["slug"] == "podcast-3-irmaos-1033"
     assert data["published_at"] == "2026-08-12"
     assert data["status"] == "created"
+    assert data["brand"] == "generic"
 
 
 def test_create_project_writes_fonte_md(tmp_path, monkeypatch):
@@ -197,3 +211,57 @@ def test_resolve_project_dir_by_bare_source_id(tmp_path, monkeypatch):
     resolved = resolve_project_dir("7xgE4ZHNWRU", settings)
 
     assert resolved == result.path
+
+
+def test_create_project_uses_explicit_brand(tmp_path, monkeypatch):
+    settings = _settings(tmp_path)
+    _write_brand(settings.brands_dir, "bussola-politica", name="Bússola Política")
+    monkeypatch.setattr(project_module, "fetch_metadata", lambda url: _fake_metadata())
+
+    result = create_project(
+        "https://www.youtube.com/watch?v=7xgE4ZHNWRU", settings, brand="bussola-politica"
+    )
+
+    data = json.loads((result.path / "project.json").read_text(encoding="utf-8"))
+    assert data["brand"] == "bussola-politica"
+
+
+def test_create_project_falls_back_to_default_brand(tmp_path, monkeypatch):
+    settings = _settings(tmp_path, default_brand="generic")
+    monkeypatch.setattr(project_module, "fetch_metadata", lambda url: _fake_metadata())
+
+    result = create_project("https://www.youtube.com/watch?v=7xgE4ZHNWRU", settings)
+
+    data = json.loads((result.path / "project.json").read_text(encoding="utf-8"))
+    assert data["brand"] == "generic"
+
+
+def test_create_project_raises_on_unknown_brand(tmp_path, monkeypatch):
+    settings = _settings(tmp_path)
+    monkeypatch.setattr(project_module, "fetch_metadata", lambda url: _fake_metadata())
+
+    try:
+        create_project(
+            "https://www.youtube.com/watch?v=7xgE4ZHNWRU", settings, brand="nao-existe"
+        )
+        assert False, "deveria ter levantado BrandNotFoundError"
+    except BrandNotFoundError:
+        pass
+
+    assert not settings.projetos_dir.exists()
+
+
+def test_load_project_defaults_brand_when_missing_from_old_schema(tmp_path, monkeypatch):
+    settings = _settings(tmp_path)
+    monkeypatch.setattr(project_module, "fetch_metadata", lambda url: _fake_metadata())
+    result = create_project("https://www.youtube.com/watch?v=7xgE4ZHNWRU", settings)
+
+    path = result.path / "project.json"
+    data = json.loads(path.read_text(encoding="utf-8"))
+    data["schema_version"] = 1
+    del data["brand"]
+    path.write_text(json.dumps(data), encoding="utf-8")
+
+    loaded = load_project(result.path)
+
+    assert loaded.brand == "generic"

@@ -10,13 +10,13 @@ cortes (FFmpeg) fica em `app/cutter.py`.
 """
 
 import csv
-import shutil
-import subprocess
 import unicodedata
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import List, Optional
 
+from app.ffmpeg_utils import INSTALL_HINT as FFMPEG_INSTALL_HINT
+from app.ffmpeg_utils import is_binary_available, run as run_ffmpeg_binary
 from app.timestamps import (
     TimestampAmbiguousError,
     TimestampFormatError,
@@ -190,6 +190,33 @@ def filter_chapters(
     return result
 
 
+def select_single_chapter(
+    chapters: List[ChapterReport],
+    *,
+    priority: Optional[str] = None,
+    chapter: Optional[int] = None,
+    order: Optional[int] = None,
+) -> ChapterReport:
+    """Filtra (mesmos critérios de `filter_chapters`) e exige exatamente 1 resultado.
+
+    Usado por comandos que operam em um único capítulo por vez (ex.:
+    `editorialize --chapter 8`, `thumbnail --chapter 8`) — `filter_chapters`
+    continua sendo usado como está para os fluxos em lote (`--priority`/`--all`).
+    """
+    matches = filter_chapters(chapters, priority=priority, chapter=chapter, order=order)
+    if not matches:
+        raise AnalysisError(
+            "Nenhum capítulo encontrado com os filtros informados "
+            f"(priority={priority!r}, chapter={chapter!r}, order={order!r})."
+        )
+    if len(matches) > 1:
+        raise AnalysisError(
+            f"Mais de um capítulo corresponde aos filtros informados "
+            f"(priority={priority!r}, chapter={chapter!r}, order={order!r}). Refine a seleção."
+        )
+    return matches[0]
+
+
 def _safe_int(value: str) -> Optional[int]:
     try:
         return int(value)
@@ -329,14 +356,10 @@ def _cross_row_warnings(chapters: List[ChapterReport]) -> List[str]:
 
 
 def get_video_duration_seconds(video_path: Path) -> float:
-    if shutil.which("ffprobe") is None:
-        raise AnalysisError(
-            "FFmpeg não foi encontrado.\n\n"
-            "Instale no macOS:\n\n"
-            "brew install ffmpeg"
-        )
+    if not is_binary_available("ffprobe"):
+        raise AnalysisError(f"FFmpeg não foi encontrado.\n\n{FFMPEG_INSTALL_HINT}")
 
-    result = subprocess.run(
+    result = run_ffmpeg_binary(
         [
             "ffprobe",
             "-v",
@@ -346,9 +369,7 @@ def get_video_duration_seconds(video_path: Path) -> float:
             "-of",
             "csv=p=0",
             str(video_path),
-        ],
-        capture_output=True,
-        text=True,
+        ]
     )
     if result.returncode != 0:
         raise AnalysisError(

@@ -17,6 +17,18 @@ from cli.main import app
 runner = CliRunner()
 
 
+def _configure_brands_env(tmp_path, monkeypatch):
+    """Aponta VIDEO_EDITORIAL_BRANDS_DIR para um fixture isolado (não o brands/ real do repo)."""
+    brands_dir = tmp_path / "brands"
+    generic_dir = brands_dir / "generic"
+    generic_dir.mkdir(parents=True)
+    (generic_dir / "brand.toml").write_text(
+        '[brand]\nslug = "generic"\nname = "Genérico"\n', encoding="utf-8"
+    )
+    monkeypatch.setenv("VIDEO_EDITORIAL_BRANDS_DIR", str(brands_dir))
+    return brands_dir
+
+
 def _fake_metadata(**overrides):
     defaults = dict(
         platform="youtube",
@@ -33,6 +45,7 @@ def _fake_metadata(**overrides):
 
 def test_init_creates_project(tmp_path, monkeypatch):
     monkeypatch.setenv("VIDEO_EDITORIAL_PROJETOS_DIR", str(tmp_path / "projetos"))
+    _configure_brands_env(tmp_path, monkeypatch)
     monkeypatch.setattr(project_module, "fetch_metadata", lambda url: _fake_metadata())
 
     result = runner.invoke(app, ["init", "https://www.youtube.com/watch?v=7xgE4ZHNWRU"])
@@ -43,6 +56,9 @@ def test_init_creates_project(tmp_path, monkeypatch):
     assert (project_dir / "project.json").is_file()
     assert (project_dir / "01 Fonte.md").is_file()
     assert "Projeto criado" in result.stdout
+    assert "Brand: generic" in result.stdout
+    data = json.loads((project_dir / "project.json").read_text(encoding="utf-8"))
+    assert data["brand"] == "generic"
     log_path = project_dir / "logs" / "pipeline.log"
     entries = [json.loads(line) for line in log_path.read_text(encoding="utf-8").strip().splitlines()]
     assert len(entries) == 1
@@ -53,6 +69,7 @@ def test_init_creates_project(tmp_path, monkeypatch):
 
 def test_init_is_idempotent(tmp_path, monkeypatch):
     monkeypatch.setenv("VIDEO_EDITORIAL_PROJETOS_DIR", str(tmp_path / "projetos"))
+    _configure_brands_env(tmp_path, monkeypatch)
     monkeypatch.setattr(project_module, "fetch_metadata", lambda url: _fake_metadata())
 
     runner.invoke(app, ["init", "https://www.youtube.com/watch?v=7xgE4ZHNWRU"])
@@ -64,6 +81,7 @@ def test_init_is_idempotent(tmp_path, monkeypatch):
 
 def test_init_reports_metadata_errors(tmp_path, monkeypatch):
     monkeypatch.setenv("VIDEO_EDITORIAL_PROJETOS_DIR", str(tmp_path / "projetos"))
+    _configure_brands_env(tmp_path, monkeypatch)
 
     def _raise(url):
         raise MetadataError("mensagem acionável")
@@ -75,9 +93,43 @@ def test_init_reports_metadata_errors(tmp_path, monkeypatch):
     assert result.exit_code == 1
 
 
+def test_init_accepts_explicit_brand(tmp_path, monkeypatch):
+    monkeypatch.setenv("VIDEO_EDITORIAL_PROJETOS_DIR", str(tmp_path / "projetos"))
+    brands_dir = _configure_brands_env(tmp_path, monkeypatch)
+    (brands_dir / "bussola-politica").mkdir()
+    (brands_dir / "bussola-politica" / "brand.toml").write_text(
+        '[brand]\nslug = "bussola-politica"\nname = "Bússola Política"\n', encoding="utf-8"
+    )
+    monkeypatch.setattr(project_module, "fetch_metadata", lambda url: _fake_metadata())
+
+    result = runner.invoke(
+        app,
+        ["init", "https://www.youtube.com/watch?v=7xgE4ZHNWRU", "--brand", "bussola-politica"],
+    )
+
+    assert result.exit_code == 0
+    assert "Brand: bussola-politica" in result.stdout
+    project_dir = tmp_path / "projetos" / "2026-08-12_podcast-3-irmaos-1033_7xgE4ZHNWRU"
+    data = json.loads((project_dir / "project.json").read_text(encoding="utf-8"))
+    assert data["brand"] == "bussola-politica"
+
+
+def test_init_reports_unknown_brand(tmp_path, monkeypatch):
+    monkeypatch.setenv("VIDEO_EDITORIAL_PROJETOS_DIR", str(tmp_path / "projetos"))
+    _configure_brands_env(tmp_path, monkeypatch)
+    monkeypatch.setattr(project_module, "fetch_metadata", lambda url: _fake_metadata())
+
+    result = runner.invoke(
+        app, ["init", "https://www.youtube.com/watch?v=7xgE4ZHNWRU", "--brand", "nao-existe"]
+    )
+
+    assert result.exit_code == 1
+
+
 def _create_project(tmp_path, monkeypatch):
     projetos_dir = tmp_path / "projetos"
     monkeypatch.setenv("VIDEO_EDITORIAL_PROJETOS_DIR", str(projetos_dir))
+    _configure_brands_env(tmp_path, monkeypatch)
     monkeypatch.setattr(project_module, "fetch_metadata", lambda url: _fake_metadata())
     runner.invoke(app, ["init", "https://www.youtube.com/watch?v=7xgE4ZHNWRU"])
     return projetos_dir / "2026-08-12_podcast-3-irmaos-1033_7xgE4ZHNWRU"
@@ -589,6 +641,7 @@ def test_status_shows_project_info_and_missing_artifacts(tmp_path, monkeypatch):
 
     assert result.exit_code == 0
     assert "Status: created" in result.stdout
+    assert "Brand: generic" in result.stdout
     assert "Podcast 3 Irmãos" in result.stdout
     assert "- Vídeo original: ausente" in result.stdout
     assert "- Cortes: 0 arquivo(s) em cortes/" in result.stdout
@@ -606,6 +659,40 @@ def test_status_shows_present_artifacts(tmp_path, monkeypatch):
     assert "- Vídeo original: presente" in result.stdout
     assert "- Áudio: presente" in result.stdout
     assert "- Cortes: 1 arquivo(s) em cortes/" in result.stdout
+
+
+def test_status_shows_per_chapter_cut_presence(tmp_path, monkeypatch):
+    from app.analysis import write_analysis_csv
+
+    project_dir = _create_project(tmp_path, monkeypatch)
+    write_analysis_csv(
+        project_dir / "03 Analise.csv",
+        [
+            AnalysisRow(
+                ordem_publicacao="1",
+                capitulo="1",
+                acao_editorial="Manter",
+                timestamp_inicial="00:00:01",
+                timestamp_final="00:00:02",
+                titulo_sugerido="Capitulo Um",
+            ),
+            AnalysisRow(
+                ordem_publicacao="2",
+                capitulo="2",
+                acao_editorial="Manter",
+                timestamp_inicial="00:00:03",
+                timestamp_final="00:00:04",
+                titulo_sugerido="Capitulo Dois",
+            ),
+        ],
+    )
+    (project_dir / "cortes" / "001_cap01_capitulo-um.mp4").write_bytes(b"fake")
+
+    result = runner.invoke(app, ["status", str(project_dir)])
+
+    assert result.exit_code == 0
+    assert "Capítulo 1: cut ✓" in result.stdout
+    assert "Capítulo 2: cut ✗" in result.stdout
 
 
 def test_status_reports_project_not_found(tmp_path, monkeypatch):

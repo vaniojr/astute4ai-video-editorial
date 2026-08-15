@@ -7,6 +7,7 @@ from pathlib import Path
 from string import Template
 from typing import Optional
 
+from app.brands import BrandNotFoundError, list_brands
 from app.config import Settings, load_settings
 from app.metadata import fetch_metadata
 from app.slug import slugify
@@ -44,6 +45,7 @@ class Project:
     slug: str
     created_at: datetime
     status: str
+    brand: str
 
 
 @dataclass(frozen=True)
@@ -95,6 +97,7 @@ def load_project(project_dir: Path) -> Project:
         slug=data["slug"],
         created_at=datetime.fromisoformat(data["created_at"]),
         status=data["status"],
+        brand=data.get("brand", "generic"),
     )
 
 
@@ -131,8 +134,19 @@ def find_existing_project(source_id: str, projetos_dir: Path) -> Optional[Path]:
     return None
 
 
-def create_project(url: str, settings: Optional[Settings] = None) -> ProjectCreationResult:
+def create_project(
+    url: str, settings: Optional[Settings] = None, *, brand: Optional[str] = None
+) -> ProjectCreationResult:
     settings = settings or load_settings()
+
+    resolved_brand = brand or settings.default_brand
+    available_brands = list_brands(settings.brands_dir)
+    if resolved_brand not in available_brands:
+        raise BrandNotFoundError(
+            f"Brand Profile '{resolved_brand}' não encontrado em '{settings.brands_dir}'.\n\n"
+            f"Disponíveis: {', '.join(available_brands) if available_brands else '(nenhum)'}"
+        )
+
     metadata = fetch_metadata(url)
 
     existing = find_existing_project(metadata.source_id, settings.projetos_dir)
@@ -147,7 +161,7 @@ def create_project(url: str, settings: Optional[Settings] = None) -> ProjectCrea
         (project_dir / subdir).mkdir(parents=True, exist_ok=True)
 
     project = Project(
-        schema_version=1,
+        schema_version=2,
         platform=metadata.platform,
         source_id=metadata.source_id,
         source_url=metadata.source_url,
@@ -158,6 +172,7 @@ def create_project(url: str, settings: Optional[Settings] = None) -> ProjectCrea
         slug=slug,
         created_at=datetime.now().astimezone(),
         status="created",
+        brand=resolved_brand,
     )
 
     _write_project_json(project, project_dir)
@@ -179,6 +194,7 @@ def _write_project_json(project: Project, project_dir: Path) -> None:
         "slug": project.slug,
         "created_at": project.created_at.isoformat(timespec="seconds"),
         "status": project.status,
+        "brand": project.brand,
     }
     (project_dir / "project.json").write_text(
         json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"

@@ -8,6 +8,41 @@ correspondente (`git show <hash>`) ou o `docs/PRD_Video_Editorial*.md` da
 época. Para um resumo por versão (menos técnico), veja
 [RELEASE_NOTES.md](RELEASE_NOTES.md).
 
+## 2026-08-15 — Entrega 8.0: Fundação compartilhada (Brand Profile, versionamento, status por capítulo)
+
+- **Brand Profile**: novo conceito transversal, usado pela editorialização
+  e thumbnail (próximas entregas) e preparado para publicação futura. Todo
+  projeto grava um `"brand"` em `project.json` (nunca vazio) — `generic`
+  (sem identidade de marca) ou `bussola-politica` por enquanto.
+  `video-editorial init URL --brand <slug>` escolhe explicitamente; sem a
+  flag, usa `VIDEO_EDITORIAL_DEFAULT_BRAND` (padrão `generic`).
+- `app/brands.py` (novo) — único módulo que lê `brands/<slug>/brand.toml`.
+  Cada recurso (`logo_enabled`, `intro_enabled`, `outro_enabled`,
+  `cta_enabled`) só pode ficar habilitado se a configuração/asset
+  correspondente existir — erro claro no carregamento, não falha
+  silenciosa. `brands/generic/` e `brands/bussola-politica/` já incluídos
+  (a Bússola Política ainda sem logo/intro/outro reais — só cores e CTA em
+  texto, até os arquivos serem adicionados).
+- `app/versioning.py` (novo) — convenção única `vNNN` (máximo existente + 1,
+  sem preencher lacunas), para ser reaproveitada por editorialização e
+  thumbnail sem duas implementações divergentes.
+- `app/ffmpeg_utils.py` (novo) — extrai a duplicação que já existia entre
+  `app/analysis.py` (`ffprobe`) e `app/cutter.py` (`ffmpeg`).
+- `app/chapter_status.py` (novo) — agregador somente-leitura do estado de
+  cada capítulo elegível (`03 Analise.csv` cruzado com `cortes/*.mp4`, por
+  ora); `video-editorial status` passa a mostrar uma quebra por capítulo.
+  Não é uma nova fonte de verdade mutável — cada etapa futura continua
+  gravando seu próprio estado.
+- `app/analysis.py::select_single_chapter()` (novo) — seleciona exatamente
+  1 capítulo por filtro (`--chapter`/`--priority`/`--order`), erro claro
+  em 0 ou >1 resultados; usado pelos comandos de capítulo único das
+  próximas entregas.
+- `project.json` sobe para `schema_version: 2` (novo campo `brand`);
+  projetos antigos (`schema_version: 1`, sem o campo) continuam
+  carregando normalmente, com `brand` assumido como `generic`.
+- `requires-python` sobe para `>=3.11` — parsing de TOML via `tomllib`
+  (stdlib), sem dependência nova.
+
 ## 2026-08-15 — Organização da documentação + release notes
 
 - `PRD_Video_Editorial.md` e `PRD_Video_Editorial_plus_analyses.md` movidos

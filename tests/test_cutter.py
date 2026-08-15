@@ -2,6 +2,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from app import cutter as cutter_module
+from app import ffmpeg_utils as ffmpeg_utils_module
 from app.analysis import AnalysisRow, ChapterReport, DryRunReport
 from app.config import Settings
 from app.cutter import CutterError, generate_cuts
@@ -20,6 +21,8 @@ def _settings(tmp_path):
         analysis_provider="claude",
         analysis_model="claude-sonnet-5",
         analysis_temperature=0.0,
+        default_brand="generic",
+        brands_dir=tmp_path / "brands",
     )
 
 
@@ -36,7 +39,7 @@ def _patch_ffmpeg(monkeypatch, returncode=0, stderr=""):
             Path(cmd[-1]).write_bytes(b"fake cut bytes")
         return _FakeCompletedProcess(returncode=returncode, stderr=stderr)
 
-    monkeypatch.setattr(cutter_module.subprocess, "run", _fake_run)
+    monkeypatch.setattr(ffmpeg_utils_module.subprocess, "run", _fake_run)
 
 
 def _make_report(tmp_path, chapters):
@@ -109,7 +112,7 @@ def test_generate_cuts_does_not_call_on_progress_for_ineligible_chapters(tmp_pat
     def _fail_if_called(cmd, capture_output=True, text=True):
         raise AssertionError("ffmpeg não deveria ser chamado")
 
-    monkeypatch.setattr(cutter_module.subprocess, "run", _fail_if_called)
+    monkeypatch.setattr(ffmpeg_utils_module.subprocess, "run", _fail_if_called)
 
     seen = []
     generate_cuts(report, project_dir, settings, on_progress=seen.append)
@@ -126,7 +129,7 @@ def test_generate_cuts_precise_mode_uses_libx264_with_settings(tmp_path, monkeyp
         Path(cmd[-1]).write_bytes(b"fake")
         return _FakeCompletedProcess(returncode=0)
 
-    monkeypatch.setattr(cutter_module.subprocess, "run", _fake_run)
+    monkeypatch.setattr(ffmpeg_utils_module.subprocess, "run", _fake_run)
     project_dir, report = _make_report(tmp_path, [_ok_chapter()])
 
     generate_cuts(report, project_dir, settings, mode="precise")
@@ -148,7 +151,7 @@ def test_generate_cuts_fast_mode_uses_stream_copy(tmp_path, monkeypatch):
         Path(cmd[-1]).write_bytes(b"fake")
         return _FakeCompletedProcess(returncode=0)
 
-    monkeypatch.setattr(cutter_module.subprocess, "run", _fake_run)
+    monkeypatch.setattr(ffmpeg_utils_module.subprocess, "run", _fake_run)
     project_dir, report = _make_report(tmp_path, [_ok_chapter()])
 
     generate_cuts(report, project_dir, settings, mode="fast")
@@ -169,7 +172,7 @@ def test_generate_cuts_skips_existing_file(tmp_path, monkeypatch):
     def _fail_if_called(cmd, capture_output=True, text=True):
         raise AssertionError("ffmpeg não deveria ser chamado quando o arquivo já existe")
 
-    monkeypatch.setattr(cutter_module.subprocess, "run", _fail_if_called)
+    monkeypatch.setattr(ffmpeg_utils_module.subprocess, "run", _fail_if_called)
 
     result = generate_cuts(report, project_dir, settings)
 
@@ -185,7 +188,7 @@ def test_generate_cuts_marks_invalid_ordem_publicacao_as_error(tmp_path, monkeyp
     def _fail_if_called(cmd, capture_output=True, text=True):
         raise AssertionError("ffmpeg não deveria ser chamado")
 
-    monkeypatch.setattr(cutter_module.subprocess, "run", _fail_if_called)
+    monkeypatch.setattr(ffmpeg_utils_module.subprocess, "run", _fail_if_called)
 
     result = generate_cuts(report, project_dir, settings)
 
@@ -200,7 +203,7 @@ def test_generate_cuts_marks_invalid_capitulo_as_error(tmp_path, monkeypatch):
     def _fail_if_called(cmd, capture_output=True, text=True):
         raise AssertionError("ffmpeg não deveria ser chamado")
 
-    monkeypatch.setattr(cutter_module.subprocess, "run", _fail_if_called)
+    monkeypatch.setattr(ffmpeg_utils_module.subprocess, "run", _fail_if_called)
 
     result = generate_cuts(report, project_dir, settings)
 
@@ -219,7 +222,7 @@ def test_generate_cuts_ffmpeg_failure_does_not_abort_other_rows(tmp_path, monkey
         Path(cmd[-1]).write_bytes(b"fake")
         return _FakeCompletedProcess(returncode=0)
 
-    monkeypatch.setattr(cutter_module.subprocess, "run", _fake_run)
+    monkeypatch.setattr(ffmpeg_utils_module.subprocess, "run", _fake_run)
     project_dir, report = _make_report(
         tmp_path,
         [
@@ -244,7 +247,7 @@ def test_generate_cuts_skips_ineligible_chapters(tmp_path, monkeypatch):
     def _fail_if_called(cmd, capture_output=True, text=True):
         raise AssertionError("ffmpeg não deveria ser chamado")
 
-    monkeypatch.setattr(cutter_module.subprocess, "run", _fail_if_called)
+    monkeypatch.setattr(ffmpeg_utils_module.subprocess, "run", _fail_if_called)
 
     result = generate_cuts(report, project_dir, settings)
 
@@ -255,12 +258,12 @@ def test_generate_cuts_skips_ineligible_chapters(tmp_path, monkeypatch):
 def test_generate_cuts_raises_when_ffmpeg_missing(tmp_path, monkeypatch):
     settings = _settings(tmp_path)
     project_dir, report = _make_report(tmp_path, [_ok_chapter()])
-    monkeypatch.setattr(cutter_module.shutil, "which", lambda name: None)
+    monkeypatch.setattr(ffmpeg_utils_module.shutil, "which", lambda name: None)
 
     def _fail_if_called(cmd, capture_output=True, text=True):
         raise AssertionError("ffmpeg não deveria ser chamado")
 
-    monkeypatch.setattr(cutter_module.subprocess, "run", _fail_if_called)
+    monkeypatch.setattr(ffmpeg_utils_module.subprocess, "run", _fail_if_called)
 
     try:
         generate_cuts(report, project_dir, settings)

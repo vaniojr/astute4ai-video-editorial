@@ -24,6 +24,8 @@ class Settings:
     analysis_provider: str
     analysis_model: str
     analysis_temperature: float
+    default_brand: str
+    brands_dir: Path
 
 
 def load_settings() -> Settings:
@@ -40,4 +42,6 @@ def load_settings() -> Settings:
         analysis_provider=os.environ.get("VIDEO_EDITORIAL_ANALYSIS_PROVIDER", "claude"),
         analysis_model=os.environ.get("VIDEO_EDITORIAL_ANALYSIS_MODEL", "claude-sonnet-5"),
         analysis_temperature=float(os.environ.get("VIDEO_EDITORIAL_ANALYSIS_TEMPERATURE", "0")),
+        default_brand=os.environ.get("VIDEO_EDITORIAL_DEFAULT_BRAND", "generic"),
+        brands_dir=Path(os.environ.get("VIDEO_EDITORIAL_BRANDS_DIR", "brands")),
     )
