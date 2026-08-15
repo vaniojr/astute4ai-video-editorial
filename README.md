@@ -6,10 +6,12 @@ e lives. Veja `docs/PRD_Video_Editorial.md` para a visão completa do produto.
 Status atual: pipeline completo da Fase 1 do PRD (`init`, `download`,
 `audio`, `transcribe`, `cut`, `status`), automação da análise editorial via
 LLM (`analyze`, Fase A), a Fundação compartilhada (Entrega 8.0 — Brand
-Profile, versionamento, status por capítulo) e a geração de thumbnails
-(Entrega 9.x — `thumbnail`/`thumbnail-select`: frames reais, briefing,
-opções de headline, abstração de provider de imagem e fluxo de aprovação
-— ainda sem nenhum provider de imagem real conectado). Veja
+Profile, versionamento, status por capítulo), planejamento editorial
+automático (Entrega 8.1 — `editorialize`: intro/cards/destaques via LLM,
+ainda sem renderização) e a geração de thumbnails (Entrega 9.x —
+`thumbnail`/`thumbnail-select`: frames reais, briefing, opções de
+headline, abstração de provider de imagem e fluxo de aprovação — ainda
+sem nenhum provider de imagem real conectado). Veja
 [docs/PIPELINE.md](docs/PIPELINE.md) para o passo a passo de ponta a ponta,
 [docs/RELEASE_NOTES.md](docs/RELEASE_NOTES.md) para os destaques de cada
 versão e [docs/CHANGELOG.md](docs/CHANGELOG.md) para o histórico detalhado
@@ -199,6 +201,42 @@ Filtros combináveis (seção 19 do PRD): `--priority A`, `--chapter 8`,
 `--order 14` — funcionam tanto com `--dry-run` quanto na geração real.
 
 ```bash
+uv run video-editorial editorialize "projetos/2026-08-12_slug_ID" --chapter 8 --dry-run
+uv run video-editorial editorialize "projetos/2026-08-12_slug_ID" --chapter 8
+```
+
+Gera um plano editorial (`editorial_plan_vNNN.json`) para o capítulo já
+cortado, via Claude — intro curta, cards de contexto/subtema, frases de
+destaque. **Não renderiza vídeo nenhum** (isso é uma entrega futura); o
+plano é só para revisão.
+
+- Exige que o corte do capítulo já exista (`cortes/...`) e que
+  `transcricao.json` exista (`transcribe` já ter rodado).
+- A IA nunca decide um timestamp em segundos: cards vêm com uma posição
+  relativa (0.0–1.0 da duração do corte, convertida em segundo pelo
+  código) e frases de destaque só entram no plano se o texto realmente
+  aparecer na transcrição do corte — citação que não bate com a
+  transcrição real é descartada.
+- Fonte (`source_attribution`) e CTA são sempre determinísticos — vêm dos
+  metadados do projeto e do Brand Profile (`brand.video.cta_text`), nunca
+  decididos pela IA.
+- `lower_thirds` fica sempre vazio nesta fase (sem registro de
+  participantes ainda).
+- `--dry-run`: mostra projeto/capítulo/corte/tema/brand/provider/modelo/
+  tamanho do trecho de transcrição que seria enviado/versões já
+  existentes, **sem chamar a API**.
+- Pede confirmação antes de qualquer chamada real (tem custo) — `--yes`
+  pula, mesmo padrão do `analyze`.
+- Idempotente: se já existir um plano para o capítulo, não gera de novo —
+  `--force` cria uma nova versão (`editorial_plan_v002.json`...), nunca
+  sobrescreve a anterior.
+- `--provider`/`--model` sobrescrevem a configuração padrão
+  (`VIDEO_EDITORIAL_EDITORIAL_PROVIDER`, padrão `claude`;
+  `VIDEO_EDITORIAL_EDITORIAL_MODEL`, padrão `claude-sonnet-5`).
+- Saída em `editorial/<mesmo-nome-base-do-corte>/`: `editorial_plan_vNNN.json`,
+  `metadata.json`.
+
+```bash
 uv run video-editorial thumbnail "projetos/2026-08-12_slug_ID" --chapter 8 --dry-run
 uv run video-editorial thumbnail "projetos/2026-08-12_slug_ID" --chapter 8
 ```
@@ -241,7 +279,7 @@ para `selected.png` e atualiza `metadata.json` (`"selected"`,
 ## Logs e progresso
 
 Toda execução de `init`/`download`/`audio`/`transcribe`/`analyze`/`cut`/
-`thumbnail`/`thumbnail-select` grava em `logs/pipeline.log` (uma linha JSON por evento): timestamp, etapa,
+`editorialize`/`thumbnail`/`thumbnail-select` grava em `logs/pipeline.log` (uma linha JSON por evento): timestamp, etapa,
 comando, resultado (`iniciado`/`ok`/`erro`), erro (quando houver) e
 `duracao_segundos`. A linha `iniciado` é gravada antes de qualquer trabalho
 pesado começar — se o processo travar ou for encerrado no meio, ela já fica
@@ -260,9 +298,10 @@ Mostra título, canal, URL, Brand Profile, o `status` atual do pipeline
 (`created` → `downloaded` → `audio_ready` → `transcribed` → `analyzed` →
 `cut`) e quais artefatos já existem (vídeo original, áudio, transcrição,
 `03 Analise.csv`, quantidade de arquivos em `cortes/`). Se `03 Analise.csv`
-já existir, mostra também uma quebra por capítulo elegível (`Manter`) —
-por ora só se o corte já foi gerado; editorialização/geração de imagem da
-thumbnail entram nessa mesma lista em entregas futuras.
+já existir, mostra também uma quebra por capítulo elegível (`Manter`) — se
+o corte já foi gerado e se já existe um plano editorial; geração de
+imagem da thumbnail entra nessa mesma lista quando um provider real
+existir.
 
 ## Testes
 

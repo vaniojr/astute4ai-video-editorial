@@ -8,6 +8,46 @@ correspondente (`git show <hash>`) ou o `docs/PRD_Video_Editorial*.md` da
 época. Para um resumo por versão (menos técnico), veja
 [RELEASE_NOTES.md](RELEASE_NOTES.md).
 
+## 2026-08-15 — Entrega 8.1: Editorial — Planner (sem renderização)
+
+- Novo comando `video-editorial editorialize PROJECT --chapter N`: gera
+  um plano editorial (`editorial_plan_vNNN.json`) via Claude — intro
+  curta, cards de contexto/subtema, frases de destaque. **Não renderiza
+  vídeo nenhum** (fica para uma entrega futura); o plano é só para
+  revisão humana.
+- Regra central (nunca violada): a IA nunca decide um timestamp em
+  segundos, absoluto ou relativo. Cards vêm com uma posição normalizada
+  (`position_fraction`, 0.0–1.0 da duração do corte) convertida para
+  segundo por `app/editorial_planner.py`; frases de destaque só entram no
+  plano se o texto realmente aparecer na transcrição real do corte
+  (`app/editorial_planner.py::find_highlight_timing`) — citação que não
+  bate com a transcrição é descartada, nunca inventada.
+- `app/timestamps.py` ganha `to_relative_seconds()` — conversão
+  determinística de timestamp absoluto (vídeo original) para relativo ao
+  início do corte.
+- Fonte (`source_attribution`) e CTA são sempre determinísticos — vêm dos
+  metadados do projeto e do Brand Profile (`brand.video.cta_text`), nunca
+  decididos pela IA (`lower_thirds` fica vazio nesta fase — sem registro
+  de participantes ainda, mesma decisão já tomada para a thumbnail).
+- `app/editorial_provider.py`/`app/editorial_claude_provider.py`: mesmo
+  padrão ABC + factory + structured output via tool use já usado por
+  `AnalysisProvider`/`ThumbnailProvider` — único arquivo que importa
+  `anthropic` desta feature.
+- `plan_editorial()` (usado por `--dry-run`) nunca chama o provider nem
+  exige `ANTHROPIC_API_KEY` — mesmo padrão de `analyzer.py::plan_analysis()`.
+- Só o trecho de transcrição correspondente ao corte é enviado à API
+  (extraído de `transcricao.json`), nunca a transcrição inteira do vídeo.
+- Versionamento (`editorial_plan_v001.json`, `v002.json`...) reaproveita
+  `app/versioning.py`; idempotente por padrão, `--force` cria versão
+  nova sem sobrescrever.
+- `app/chapter_status.py` ganha o campo `editorial_planned`; `status`
+  mostra os dois marcadores por capítulo (`cut`/`editorial (planejado)`).
+- Prompts novos em `prompts/editorial/` (`system.md`/`editorial.md`),
+  mesmo tom/regras de neutralidade do `prompts/analysis/`.
+- Validado com uma chamada real (paga) à API da Claude, de ponta a ponta
+  (`init → download → audio → transcribe → cut → editorialize`), sem
+  mocks.
+
 ## 2026-08-15 — Thumbnail: abstração de provider, versionamento e aprovação
 
 - `app/thumbnail_provider.py` (novo): `ThumbnailProvider` (ABC) +

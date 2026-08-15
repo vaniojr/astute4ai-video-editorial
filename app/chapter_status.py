@@ -1,10 +1,10 @@
 """Agregador somente-leitura do estado de cada capítulo (PRD `News features.md` seção 7).
 
-Cruza `03 Analise.csv` com os artefatos já presentes no disco — por ora só
-`cortes/*.mp4`; editorialização e thumbnail entram aqui nas Entregas
-8.1/9.1, lendo seus próprios `metadata.json`. Não é uma nova fonte de
-verdade mutável: cada etapa continua gravando seu próprio estado, este
-módulo só lê e resume para `video-editorial status`.
+Cruza `03 Analise.csv` com os artefatos já presentes no disco: `cortes/*.mp4`
+e `editorial/<corte>/metadata.json` (geração de imagem da thumbnail entra
+aqui quando um provider real existir). Não é uma nova fonte de verdade
+mutável: cada etapa continua gravando seu próprio estado, este módulo só
+lê e resume para `video-editorial status`.
 """
 
 from dataclasses import dataclass
@@ -24,6 +24,7 @@ class ChapterStatus:
     ordem_publicacao: str
     cut: bool
     cut_path: Optional[Path]
+    editorial_planned: bool
 
 
 def get_chapter_statuses(project_dir: Path, settings: Settings) -> List[ChapterStatus]:
@@ -32,6 +33,7 @@ def get_chapter_statuses(project_dir: Path, settings: Settings) -> List[ChapterS
         return []
 
     cortes_dir = project_dir / "cortes"
+    editorial_dir = project_dir / "editorial"
     statuses = []
     for row in load_analysis(csv_path):
         if classify_action(row.acao_editorial) != "keep":
@@ -43,12 +45,14 @@ def get_chapter_statuses(project_dir: Path, settings: Settings) -> List[ChapterS
 
         cut_path = cortes_dir / filename
         exists = cut_path.is_file()
+        editorial_planned = (editorial_dir / Path(filename).stem / "metadata.json").is_file()
         statuses.append(
             ChapterStatus(
                 capitulo=row.capitulo,
                 ordem_publicacao=row.ordem_publicacao,
                 cut=exists,
                 cut_path=cut_path if exists else None,
+                editorial_planned=editorial_planned,
             )
         )
     return statuses

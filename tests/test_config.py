@@ -19,6 +19,9 @@ def test_load_settings_defaults(monkeypatch):
         "VIDEO_EDITORIAL_DEFAULT_BRAND",
         "VIDEO_EDITORIAL_BRANDS_DIR",
         "VIDEO_EDITORIAL_THUMBNAIL_PROVIDER",
+        "VIDEO_EDITORIAL_EDITORIAL_PROVIDER",
+        "VIDEO_EDITORIAL_EDITORIAL_MODEL",
+        "VIDEO_EDITORIAL_EDITORIAL_TEMPERATURE",
     ):
         monkeypatch.delenv(var, raising=False)
 
@@ -38,6 +41,9 @@ def test_load_settings_defaults(monkeypatch):
     assert settings.default_brand == "generic"
     assert settings.brands_dir == Path("brands")
     assert settings.thumbnail_provider == "manual"
+    assert settings.editorial_provider == "claude"
+    assert settings.editorial_model == "claude-sonnet-5"
+    assert settings.editorial_temperature == 0.0
 
 
 def test_load_settings_reads_env_var_overrides(monkeypatch, tmp_path):
@@ -55,6 +61,9 @@ def test_load_settings_reads_env_var_overrides(monkeypatch, tmp_path):
     monkeypatch.setenv("VIDEO_EDITORIAL_DEFAULT_BRAND", "bussola-politica")
     monkeypatch.setenv("VIDEO_EDITORIAL_BRANDS_DIR", str(tmp_path / "outras-brands"))
     monkeypatch.setenv("VIDEO_EDITORIAL_THUMBNAIL_PROVIDER", "outro-provider")
+    monkeypatch.setenv("VIDEO_EDITORIAL_EDITORIAL_PROVIDER", "claude")
+    monkeypatch.setenv("VIDEO_EDITORIAL_EDITORIAL_MODEL", "claude-opus-5")
+    monkeypatch.setenv("VIDEO_EDITORIAL_EDITORIAL_TEMPERATURE", "0.3")
 
     settings = load_settings()
 
@@ -72,3 +81,6 @@ def test_load_settings_reads_env_var_overrides(monkeypatch, tmp_path):
     assert settings.default_brand == "bussola-politica"
     assert settings.brands_dir == tmp_path / "outras-brands"
     assert settings.thumbnail_provider == "outro-provider"
+    assert settings.editorial_provider == "claude"
+    assert settings.editorial_model == "claude-opus-5"
+    assert settings.editorial_temperature == 0.3

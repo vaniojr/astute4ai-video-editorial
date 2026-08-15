@@ -10,6 +10,7 @@ from app.audio import AudioError, AudioResult
 from app.brands import Brand, BrandAssets, BrandColors, BrandFeatures, BrandThumbnailConfig, BrandVideoConfig
 from app.cutter import CutOutcome, CutRunResult, CutterError
 from app.downloader import DownloadError, DownloadResult
+from app.editorial_service import EditorialGenerationPlan, EditorialGenerationResult, EditorialServiceError
 from app.metadata import MetadataError, VideoMetadata
 from app.thumbnail_frames import ThumbnailFramesError
 from app.thumbnail_service import ThumbnailGenerationResult, ThumbnailPlan, ThumbnailServiceError
@@ -464,6 +465,182 @@ def test_analyze_reports_project_not_found(tmp_path, monkeypatch):
     monkeypatch.setenv("VIDEO_EDITORIAL_PROJETOS_DIR", str(tmp_path / "projetos"))
 
     result = runner.invoke(app, ["analyze", "nao-existe", "--dry-run"])
+
+    assert result.exit_code == 1
+
+
+def _fake_editorial_plan(project_dir, **overrides):
+    row = AnalysisRow(
+        ordem_publicacao="8",
+        capitulo="8",
+        acao_editorial="Manter",
+        tema_principal="Governabilidade",
+        titulo_sugerido="Não vou ser usado pelo Centrão",
+    )
+    chapter_report = ChapterReport(row=row, status="ok", start_seconds=1747.0, end_seconds=2242.0)
+    defaults = dict(
+        project_dir=project_dir,
+        provider="claude",
+        model="claude-sonnet-5",
+        project=project_module.load_project(project_dir),
+        brand=_fake_brand(),
+        chapter_report=chapter_report,
+        cut_path=project_dir / "cortes" / "008_cap08_nao-vou-ser-usado-pelo-centrao.mp4",
+        editorial_dir=project_dir / "editorial" / "008_cap08_nao-vou-ser-usado-pelo-centrao",
+        cut_duration_seconds=495.0,
+        transcript_segments=[],
+        transcript_excerpt="[00:00:00 → 00:00:04] trecho de teste",
+        transcript_char_count=37,
+        already_exists=False,
+        existing_plan_versions=0,
+    )
+    defaults.update(overrides)
+    return EditorialGenerationPlan(**defaults)
+
+
+def _fake_editorial_plan_result(plan):
+    from app.editorial_models import ContextCard, Cta, EditorialPlan, Highlight, Intro, SourceAttribution
+
+    editorial_plan = EditorialPlan(
+        chapter="8",
+        cut_file=plan.cut_path.name,
+        brand="generic",
+        version=1,
+        intro=Intro(mode="text_only", text="Intro de teste"),
+        source_attribution=SourceAttribution(text="Fonte original: Teste"),
+        lower_thirds=[],
+        context_cards=[ContextCard(kind="context", text="CONTEXTO", timestamp=10.0)],
+        highlights=[Highlight(text="citação", start=5.0, end=8.0)],
+        cta=Cta(enabled=True, text="CTA"),
+        provider="claude",
+        model="claude-sonnet-5",
+    )
+    plan_path = plan.editorial_dir / "editorial_plan_v001.json"
+    metadata_path = plan.editorial_dir / "metadata.json"
+    return EditorialGenerationResult(
+        plan=plan, skipped=False, editorial_plan=editorial_plan, plan_path=plan_path, metadata_path=metadata_path
+    )
+
+
+def test_editorialize_dry_run_prints_plan_without_calling_service(tmp_path, monkeypatch):
+    project_dir = _create_project(tmp_path, monkeypatch)
+    plan = _fake_editorial_plan(project_dir)
+    monkeypatch.setattr(
+        cli_main, "plan_editorial", lambda pdir, settings, chapter, provider=None, model=None: plan
+    )
+
+    def _fail_if_called(*args, **kwargs):
+        raise AssertionError("generate_editorial não deveria ser chamado em --dry-run")
+
+    monkeypatch.setattr(cli_main, "generate_editorial", _fail_if_called)
+
+    result = runner.invoke(app, ["editorialize", str(project_dir), "--chapter", "8", "--dry-run"])
+
+    assert result.exit_code == 0
+    assert "DRY RUN" in result.stdout
+    assert "Nenhuma chamada de API realizada." in result.stdout
+    assert "Governabilidade" in result.stdout
+
+
+def test_editorialize_reports_existing_plan_without_force(tmp_path, monkeypatch):
+    project_dir = _create_project(tmp_path, monkeypatch)
+    plan = _fake_editorial_plan(project_dir, already_exists=True)
+    monkeypatch.setattr(
+        cli_main, "plan_editorial", lambda pdir, settings, chapter, provider=None, model=None: plan
+    )
+
+    result = runner.invoke(app, ["editorialize", str(project_dir), "--chapter", "8", "--yes"])
+
+    assert result.exit_code == 0
+    assert "Já existe um plano editorial" in result.stdout
+
+
+def test_editorialize_confirmation_prompt_cancels_without_yes(tmp_path, monkeypatch):
+    project_dir = _create_project(tmp_path, monkeypatch)
+    plan = _fake_editorial_plan(project_dir)
+    monkeypatch.setattr(
+        cli_main, "plan_editorial", lambda pdir, settings, chapter, provider=None, model=None: plan
+    )
+
+    def _fail_if_called(*args, **kwargs):
+        raise AssertionError("generate_editorial não deveria ser chamado se o usuário cancelar")
+
+    monkeypatch.setattr(cli_main, "generate_editorial", _fail_if_called)
+
+    result = runner.invoke(app, ["editorialize", str(project_dir), "--chapter", "8"], input="n\n")
+
+    assert result.exit_code == 0
+    assert "Cancelado" in result.stdout
+
+
+def test_editorialize_yes_skips_confirmation_and_prints_summary(tmp_path, monkeypatch):
+    project_dir = _create_project(tmp_path, monkeypatch)
+    plan = _fake_editorial_plan(project_dir)
+    monkeypatch.setattr(
+        cli_main, "plan_editorial", lambda pdir, settings, chapter, provider=None, model=None: plan
+    )
+    fake_result = _fake_editorial_plan_result(plan)
+    monkeypatch.setattr(
+        cli_main,
+        "generate_editorial",
+        lambda pdir, settings, chapter, provider=None, model=None, force=False: fake_result,
+    )
+
+    result = runner.invoke(app, ["editorialize", str(project_dir), "--chapter", "8", "--yes"])
+
+    assert result.exit_code == 0
+    assert "Chamando a API da Claude" in result.stdout
+    assert "Plano editorial gerado" in result.stdout
+    assert "Renderização ainda não implementada" in result.stdout
+
+
+def test_editorialize_reports_service_errors(tmp_path, monkeypatch):
+    project_dir = _create_project(tmp_path, monkeypatch)
+    plan = _fake_editorial_plan(project_dir)
+    monkeypatch.setattr(
+        cli_main, "plan_editorial", lambda pdir, settings, chapter, provider=None, model=None: plan
+    )
+
+    def _raise(pdir, settings, chapter, provider=None, model=None, force=False):
+        raise EditorialServiceError("mensagem acionável")
+
+    monkeypatch.setattr(cli_main, "generate_editorial", _raise)
+
+    result = runner.invoke(app, ["editorialize", str(project_dir), "--chapter", "8", "--yes"])
+
+    assert result.exit_code == 1
+
+
+def test_editorialize_reports_plan_errors(tmp_path, monkeypatch):
+    project_dir = _create_project(tmp_path, monkeypatch)
+
+    def _raise(pdir, settings, chapter, provider=None, model=None):
+        raise EditorialServiceError("corte não encontrado")
+
+    monkeypatch.setattr(cli_main, "plan_editorial", _raise)
+
+    result = runner.invoke(app, ["editorialize", str(project_dir), "--chapter", "8", "--dry-run"])
+
+    assert result.exit_code == 1
+
+
+def test_editorialize_reports_chapter_not_found(tmp_path, monkeypatch):
+    project_dir = _create_project(tmp_path, monkeypatch)
+
+    def _raise(pdir, settings, chapter, provider=None, model=None):
+        raise AnalysisError("nenhum capítulo encontrado")
+
+    monkeypatch.setattr(cli_main, "plan_editorial", _raise)
+
+    result = runner.invoke(app, ["editorialize", str(project_dir), "--chapter", "99", "--dry-run"])
+
+    assert result.exit_code == 1
+
+
+def test_editorialize_reports_project_not_found(tmp_path, monkeypatch):
+    monkeypatch.setenv("VIDEO_EDITORIAL_PROJETOS_DIR", str(tmp_path / "projetos"))
+
+    result = runner.invoke(app, ["editorialize", "nao-existe", "--chapter", "8", "--dry-run"])
 
     assert result.exit_code == 1
 

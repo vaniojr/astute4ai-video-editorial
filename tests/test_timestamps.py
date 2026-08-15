@@ -5,6 +5,7 @@ from app.timestamps import (
     TimestampFormatError,
     TimestampOutOfRangeError,
     parse_timestamp,
+    to_relative_seconds,
 )
 
 # Duração de referência usada no exemplo da seção 18/30 do PRD (01:45:03).
@@ -91,3 +92,12 @@ def test_two_parts_out_of_range_raises():
 def test_three_parts_nonzero_seconds_out_of_range_raises():
     with pytest.raises(TimestampOutOfRangeError):
         parse_timestamp("05:00:09", 100)
+
+
+def test_to_relative_seconds_subtracts_cut_start():
+    assert to_relative_seconds(1747.0, 1747.0) == 0.0
+    assert to_relative_seconds(1800.0, 1747.0) == 53.0
+
+
+def test_to_relative_seconds_never_negative():
+    assert to_relative_seconds(100.0, 200.0) == 0.0

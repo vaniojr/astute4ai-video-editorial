@@ -23,6 +23,8 @@ from app.chapter_status import get_chapter_statuses
 from app.config import load_settings
 from app.cutter import CutRunResult, CutterError, generate_cuts
 from app.downloader import DownloadError, download_video
+from app.editorial_provider import EditorialProviderError
+from app.editorial_service import EditorialServiceError, generate_editorial, plan_editorial
 from app.logging_utils import log_event, log_operation
 from app.metadata import MetadataError
 from app.project import (
@@ -390,6 +392,84 @@ def cut(
 
 
 @app.command()
+def editorialize(
+    project: str = typer.Argument(..., help="Nome do diretório em projetos/ ou caminho do projeto."),
+    chapter: int = typer.Option(..., "--chapter", help="Número do capítulo (Capitulo no CSV)."),
+    provider: Optional[str] = typer.Option(
+        None, "--provider", help="Provider de editorialização (padrão: configuração)."
+    ),
+    model: Optional[str] = typer.Option(None, "--model", help="Modelo do provider (padrão: configuração)."),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Mostra o plano de entrada (trecho de transcrição, provider) sem chamar a API."
+    ),
+    force: bool = typer.Option(
+        False, "--force", help="Gerar novamente mesmo se já existir um plano para este capítulo."
+    ),
+    yes: bool = typer.Option(
+        False, "--yes", help="Não pedir confirmação antes de chamar a API (uso em automação)."
+    ),
+) -> None:
+    """Gera um plano editorial (intro, cards, destaques) para um capítulo, via LLM.
+
+    Não renderiza vídeo nenhum — só produz `editorial_plan_vNNN.json` para revisão.
+    """
+    settings = load_settings()
+    try:
+        project_dir = resolve_project_dir(project, settings)
+    except ProjectNotFoundError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1)
+
+    try:
+        plan = plan_editorial(project_dir, settings, chapter=chapter, provider=provider, model=model)
+    except (EditorialServiceError, AnalysisError) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1)
+
+    if dry_run:
+        _print_editorial_plan(plan)
+        return
+
+    if plan.already_exists and not force:
+        typer.echo(f"Já existe um plano editorial para o capítulo {chapter}.")
+        typer.echo("Use --force para gerar novamente.")
+        return
+
+    if not yes:
+        typer.echo(f"Provider: {plan.provider}")
+        typer.echo(f"Modelo: {plan.model}")
+        typer.echo("A editorialização utilizará uma API externa e poderá gerar custos.")
+        if not _confirm_yes_no("Continuar? [s/N] "):
+            typer.echo("Cancelado.")
+            raise typer.Exit(code=0)
+
+    typer.echo(f"Chamando a API da Claude ({plan.provider}/{plan.model})...")
+    try:
+        result = generate_editorial(
+            project_dir, settings, chapter=chapter, provider=provider, model=model, force=force
+        )
+    except (EditorialServiceError, EditorialProviderError, AnalysisError) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1)
+
+    if result.skipped:
+        typer.echo(f"Já existe um plano editorial para o capítulo {chapter}.")
+        typer.echo("Use --force para gerar novamente.")
+        return
+
+    editorial_plan = result.editorial_plan
+    typer.echo("Plano editorial gerado:\n")
+    typer.echo(str(result.plan_path))
+    typer.echo("")
+    typer.echo(f"Intro: {'sim' if editorial_plan.intro.mode == 'text_only' else 'não'}")
+    typer.echo(f"Cards: {len(editorial_plan.context_cards)}")
+    typer.echo(f"Destaques: {len(editorial_plan.highlights)}")
+    typer.echo(f"CTA: {'sim' if editorial_plan.cta.enabled else 'não'}")
+    typer.echo("")
+    typer.echo("Renderização ainda não implementada — revise o plano antes da próxima entrega.")
+
+
+@app.command()
 def thumbnail(
     project: str = typer.Argument(..., help="Nome do diretório em projetos/ ou caminho do projeto."),
     chapter: int = typer.Option(..., "--chapter", help="Número do capítulo (Capitulo no CSV)."),
@@ -530,8 +610,11 @@ def status(
         typer.echo("")
         typer.echo("Por capítulo:")
         for chapter in chapter_statuses:
-            marca = "✓" if chapter.cut else "✗"
-            typer.echo(f"- Capítulo {chapter.capitulo}: cut {marca}")
+            cut_marca = "✓" if chapter.cut else "✗"
+            editorial_marca = "✓" if chapter.editorial_planned else "✗"
+            typer.echo(
+                f"- Capítulo {chapter.capitulo}: cut {cut_marca} | editorial (planejado) {editorial_marca}"
+            )
 
 
 def _presence(path: Path) -> str:
@@ -590,6 +673,31 @@ def _print_thumbnail_plan(plan) -> None:
     typer.echo("")
     typer.echo("DRY RUN")
     typer.echo("Nenhuma imagem final será gerada.")
+
+
+def _print_editorial_plan(plan) -> None:
+    row = plan.chapter_report.row
+    typer.echo("Projeto:")
+    typer.echo(plan.project_dir.name)
+    typer.echo("Capítulo:")
+    typer.echo(row.capitulo)
+    typer.echo("Corte:")
+    typer.echo(plan.cut_path.name)
+    typer.echo("Tema:")
+    typer.echo(row.tema_principal or "(não informado)")
+    typer.echo("Brand:")
+    typer.echo(plan.brand.name)
+    typer.echo("Provider:")
+    typer.echo(plan.provider)
+    typer.echo("Modelo:")
+    typer.echo(plan.model)
+    typer.echo("Trecho de transcrição enviado:")
+    typer.echo(f"{plan.transcript_char_count:,}".replace(",", ".") + " caracteres")
+    typer.echo("Versões de plano existentes:")
+    typer.echo(str(plan.existing_plan_versions))
+    typer.echo("")
+    typer.echo("DRY RUN")
+    typer.echo("Nenhuma chamada de API realizada.")
 
 
 def _confirm_yes_no(prompt: str) -> bool:

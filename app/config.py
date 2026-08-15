@@ -27,6 +27,9 @@ class Settings:
     default_brand: str
     brands_dir: Path
     thumbnail_provider: str
+    editorial_provider: str
+    editorial_model: str
+    editorial_temperature: float
 
 
 def load_settings() -> Settings:
@@ -46,4 +49,7 @@ def load_settings() -> Settings:
         default_brand=os.environ.get("VIDEO_EDITORIAL_DEFAULT_BRAND", "generic"),
         brands_dir=Path(os.environ.get("VIDEO_EDITORIAL_BRANDS_DIR", "brands")),
         thumbnail_provider=os.environ.get("VIDEO_EDITORIAL_THUMBNAIL_PROVIDER", "manual"),
+        editorial_provider=os.environ.get("VIDEO_EDITORIAL_EDITORIAL_PROVIDER", "claude"),
+        editorial_model=os.environ.get("VIDEO_EDITORIAL_EDITORIAL_MODEL", "claude-sonnet-5"),
+        editorial_temperature=float(os.environ.get("VIDEO_EDITORIAL_EDITORIAL_TEMPERATURE", "0")),
     )

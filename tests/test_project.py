@@ -42,6 +42,9 @@ def _settings(tmp_path, default_brand="generic"):
         default_brand=default_brand,
         brands_dir=brands_dir,
         thumbnail_provider="manual",
+        editorial_provider="claude",
+        editorial_model="claude-sonnet-5",
+        editorial_temperature=0.0,
     )
 
 

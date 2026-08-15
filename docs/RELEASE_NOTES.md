@@ -4,6 +4,15 @@ Resumo em destaques do que cada versão trouxe, pensado para leitura rápida —
 "o que dá pra fazer agora que não dava antes". Para detalhe técnico
 (arquivos, commits, decisões), veja [CHANGELOG.md](CHANGELOG.md).
 
+## v0.6.0 — 2026-08-15
+
+- **Planejamento editorial automático**: novo comando `editorialize` gera,
+  via Claude, uma proposta de intro, cards de contexto e frases de
+  destaque para um capítulo já cortado — pronta para revisão humana.
+  Ainda não renderiza o vídeo final (próxima versão); a IA nunca decide
+  timestamps, só sugere texto e posição relativa, sempre convertidos e
+  verificados contra a transcrição real pelo código.
+
 ## v0.5.0 — 2026-08-15
 
 - **Thumbnail: pronto para conectar um provider de imagem real**: a

@@ -131,3 +131,13 @@ def format_hms(seconds: float) -> str:
     hours, remainder = divmod(int(seconds), 3600)
     minutes, secs = divmod(remainder, 60)
     return f"{hours:02d}:{minutes:02d}:{secs:02d}"
+
+
+def to_relative_seconds(absolute_seconds: float, cut_start_seconds: float) -> float:
+    """Converte um timestamp absoluto (vídeo original) para relativo ao início do corte.
+
+    Determinística, sem qualquer intervenção de IA (Feature_Editorializacao_Automatica.md
+    seção 34) — a IA nunca decide um timestamp absoluto ou relativo em segundos, só
+    propõe texto/posição relativa; esta função é sempre quem faz a conta.
+    """
+    return max(absolute_seconds - cut_start_seconds, 0.0)

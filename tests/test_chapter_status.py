@@ -19,6 +19,9 @@ def _settings(tmp_path):
         default_brand="generic",
         brands_dir=tmp_path / "brands",
         thumbnail_provider="manual",
+        editorial_provider="claude",
+        editorial_model="claude-sonnet-5",
+        editorial_temperature=0.0,
     )
 
 
@@ -63,8 +66,32 @@ def test_get_chapter_statuses_reflects_cut_presence(tmp_path):
     by_capitulo = {s.capitulo: s for s in statuses}
     assert by_capitulo["1"].cut is True
     assert by_capitulo["1"].cut_path == project_dir / "cortes" / "001_cap01_capitulo-um.mp4"
+    assert by_capitulo["1"].editorial_planned is False
     assert by_capitulo["2"].cut is False
     assert by_capitulo["2"].cut_path is None
+
+
+def test_get_chapter_statuses_reflects_editorial_planned(tmp_path):
+    project_dir = _make_project(tmp_path)
+    settings = _settings(tmp_path)
+    write_analysis_csv(
+        project_dir / "03 Analise.csv",
+        [
+            AnalysisRow(
+                ordem_publicacao="1",
+                capitulo="1",
+                acao_editorial="Manter",
+                titulo_sugerido="Capitulo Um",
+            ),
+        ],
+    )
+    editorial_dir = project_dir / "editorial" / "001_cap01_capitulo-um"
+    editorial_dir.mkdir(parents=True)
+    (editorial_dir / "metadata.json").write_text("{}", encoding="utf-8")
+
+    statuses = get_chapter_statuses(project_dir, settings)
+
+    assert statuses[0].editorial_planned is True
 
 
 def test_get_chapter_statuses_skips_non_keep_rows(tmp_path):
