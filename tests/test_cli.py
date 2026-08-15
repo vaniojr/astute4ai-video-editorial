@@ -12,7 +12,7 @@ from app.cutter import CutOutcome, CutRunResult, CutterError
 from app.downloader import DownloadError, DownloadResult
 from app.metadata import MetadataError, VideoMetadata
 from app.thumbnail_frames import ThumbnailFramesError
-from app.thumbnail_service import ThumbnailBriefingResult, ThumbnailPlan, ThumbnailServiceError
+from app.thumbnail_service import ThumbnailGenerationResult, ThumbnailPlan, ThumbnailServiceError
 from app.transcriber import TranscribeResult, TranscriptionError, TranscriptSegment
 from cli import main as cli_main
 from cli.main import app
@@ -668,6 +668,7 @@ def _fake_thumbnail_plan(project_dir, *, already_exists=False):
         thumb_dir=project_dir / "thumbs" / "008_cap08_nao-vou-ser-usado-pelo-centrao",
         frame_count=9,
         already_exists=already_exists,
+        existing_image_versions=0,
     )
 
 
@@ -711,37 +712,65 @@ def test_thumbnail_reports_chapter_not_found(tmp_path, monkeypatch):
     assert result.exit_code == 1
 
 
-def test_thumbnail_generates_frames_and_briefing(tmp_path, monkeypatch):
+def _fake_generation_result(plan, *, image_paths=None):
+    plan.thumb_dir.mkdir(parents=True, exist_ok=True)
+    (plan.thumb_dir / "frames").mkdir(exist_ok=True)
+    frame_paths = [plan.thumb_dir / "frames" / f"frame-{i:02d}.jpg" for i in range(1, 10)]
+    for p in frame_paths:
+        p.write_bytes(b"fake")
+    briefing_path = plan.thumb_dir / "briefing.md"
+    briefing_path.write_text("briefing", encoding="utf-8")
+    metadata_path = plan.thumb_dir / "metadata.json"
+    metadata_path.write_text("{}", encoding="utf-8")
+    return ThumbnailGenerationResult(
+        plan=plan,
+        skipped=False,
+        frame_paths=frame_paths,
+        briefing_path=briefing_path,
+        metadata_path=metadata_path,
+        image_paths=image_paths or [],
+    )
+
+
+def test_thumbnail_generates_frames_and_briefing_without_provider(tmp_path, monkeypatch):
     project_dir = _create_project(tmp_path, monkeypatch)
     plan = _fake_thumbnail_plan(project_dir)
     monkeypatch.setattr(cli_main, "plan_thumbnail", lambda pdir, settings, chapter, provider: plan)
 
-    frame_paths = [plan.thumb_dir / "frames" / f"frame-{i:02d}.jpg" for i in range(1, 10)]
-
     def _fake_generate(pdir, settings, chapter, provider, force):
-        plan.thumb_dir.mkdir(parents=True, exist_ok=True)
-        (plan.thumb_dir / "frames").mkdir(exist_ok=True)
-        for p in frame_paths:
-            p.write_bytes(b"fake")
-        briefing_path = plan.thumb_dir / "briefing.md"
-        briefing_path.write_text("briefing", encoding="utf-8")
-        metadata_path = plan.thumb_dir / "metadata.json"
-        metadata_path.write_text("{}", encoding="utf-8")
-        return ThumbnailBriefingResult(
-            plan=plan,
-            skipped=False,
-            frame_paths=frame_paths,
-            briefing_path=briefing_path,
-            metadata_path=metadata_path,
-        )
+        return _fake_generation_result(plan)
 
-    monkeypatch.setattr(cli_main, "generate_thumbnail_briefing", _fake_generate)
+    monkeypatch.setattr(cli_main, "generate_thumbnail", _fake_generate)
 
     result = runner.invoke(app, ["thumbnail", str(project_dir), "--chapter", "8"])
 
     assert result.exit_code == 0
     assert "Concluído" in result.stdout
     assert "9 frame(s) em frames/" in result.stdout
+    assert "Nenhuma imagem gerada" in result.stdout
+    assert "provider 'manual'" in result.stdout
+
+
+def test_thumbnail_prints_generated_image_versions(tmp_path, monkeypatch):
+    project_dir = _create_project(tmp_path, monkeypatch)
+    plan = _fake_thumbnail_plan(project_dir)
+    monkeypatch.setattr(cli_main, "plan_thumbnail", lambda pdir, settings, chapter, provider: plan)
+
+    def _fake_generate(pdir, settings, chapter, provider, force):
+        image_paths = [
+            plan.thumb_dir / "thumbnail_v001.png",
+            plan.thumb_dir / "thumbnail_v002.png",
+        ]
+        return _fake_generation_result(plan, image_paths=image_paths)
+
+    monkeypatch.setattr(cli_main, "generate_thumbnail", _fake_generate)
+
+    result = runner.invoke(app, ["thumbnail", str(project_dir), "--chapter", "8"])
+
+    assert result.exit_code == 0
+    assert "2 thumbnail(s) gerada(s)" in result.stdout
+    assert "thumbnail_v001.png" in result.stdout
+    assert "thumbnail-select" in result.stdout
 
 
 def test_thumbnail_skips_when_already_exists_without_force(tmp_path, monkeypatch):
@@ -750,9 +779,9 @@ def test_thumbnail_skips_when_already_exists_without_force(tmp_path, monkeypatch
     monkeypatch.setattr(cli_main, "plan_thumbnail", lambda pdir, settings, chapter, provider: plan)
 
     def _fail_if_called(*args, **kwargs):
-        raise AssertionError("generate_thumbnail_briefing não deveria ser chamado")
+        raise AssertionError("generate_thumbnail não deveria ser chamado")
 
-    monkeypatch.setattr(cli_main, "generate_thumbnail_briefing", _fail_if_called)
+    monkeypatch.setattr(cli_main, "generate_thumbnail", _fail_if_called)
 
     result = runner.invoke(app, ["thumbnail", str(project_dir), "--chapter", "8"])
 
@@ -769,7 +798,7 @@ def test_thumbnail_reports_ffmpeg_errors(tmp_path, monkeypatch):
     def _raise(pdir, settings, chapter, provider, force):
         raise ThumbnailFramesError("FFmpeg falhou")
 
-    monkeypatch.setattr(cli_main, "generate_thumbnail_briefing", _raise)
+    monkeypatch.setattr(cli_main, "generate_thumbnail", _raise)
 
     result = runner.invoke(app, ["thumbnail", str(project_dir), "--chapter", "8"])
 
@@ -780,6 +809,55 @@ def test_thumbnail_reports_project_not_found(tmp_path, monkeypatch):
     monkeypatch.setenv("VIDEO_EDITORIAL_PROJETOS_DIR", str(tmp_path / "projetos"))
 
     result = runner.invoke(app, ["thumbnail", "nao-existe", "--chapter", "8", "--dry-run"])
+
+    assert result.exit_code == 1
+
+
+def test_thumbnail_select_copies_chosen_version(tmp_path, monkeypatch):
+    from app.thumbnail_service import ThumbnailSelectionResult
+
+    project_dir = _create_project(tmp_path, monkeypatch)
+    selected_path = project_dir / "thumbs" / "008_cap08_nao-vou-ser-usado-pelo-centrao" / "selected.png"
+
+    def _fake_select(pdir, settings, chapter, version):
+        selected_path.parent.mkdir(parents=True, exist_ok=True)
+        selected_path.write_bytes(b"fake png")
+        return ThumbnailSelectionResult(
+            thumb_dir=selected_path.parent, selected_path=selected_path, version=version
+        )
+
+    monkeypatch.setattr(cli_main, "select_thumbnail_version", _fake_select)
+
+    result = runner.invoke(
+        app, ["thumbnail-select", str(project_dir), "--chapter", "8", "--version", "2"]
+    )
+
+    assert result.exit_code == 0
+    assert "v002" in result.stdout
+    assert str(selected_path) in result.stdout
+
+
+def test_thumbnail_select_reports_service_errors(tmp_path, monkeypatch):
+    project_dir = _create_project(tmp_path, monkeypatch)
+
+    def _raise(pdir, settings, chapter, version):
+        raise ThumbnailServiceError("versão não encontrada")
+
+    monkeypatch.setattr(cli_main, "select_thumbnail_version", _raise)
+
+    result = runner.invoke(
+        app, ["thumbnail-select", str(project_dir), "--chapter", "8", "--version", "9"]
+    )
+
+    assert result.exit_code == 1
+
+
+def test_thumbnail_select_reports_project_not_found(tmp_path, monkeypatch):
+    monkeypatch.setenv("VIDEO_EDITORIAL_PROJETOS_DIR", str(tmp_path / "projetos"))
+
+    result = runner.invoke(
+        app, ["thumbnail-select", "nao-existe", "--chapter", "8", "--version", "1"]
+    )
 
     assert result.exit_code == 1
 

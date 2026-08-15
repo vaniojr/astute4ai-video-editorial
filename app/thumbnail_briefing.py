@@ -1,17 +1,22 @@
-"""Geração determinística do briefing.md da thumbnail (Feature_thumbnail.md seção 10).
+"""Geração determinística do briefing.md e das opções de headline da thumbnail
+(Feature_thumbnail.md seções 10 e 15).
 
-Sem IA nesta fase — o texto principal sugerido reaproveita `Titulo
-Sugerido` do CSV (já passou por revisão humana antes do corte); geração de
-variações de headline via IA fica para uma entrega futura. Nunca inventa
-participante — `participants_unknown` fica sempre `true` aqui, já que o
-registro de participantes ficou deliberadamente fora de escopo na
-Fundação 8.0 (Feature_thumbnail.md seção 16 permite esse fallback
-explicitamente).
+Sem IA nesta fase — texto principal e opções de headline reaproveitam
+campos do CSV que já passaram por revisão humana antes do corte (`Titulo
+Sugerido`, `Pergunta Principal`, `Tema Principal`); nada é inventado, só
+selecionado/deduplicado. Nunca inventa participante — `participants_unknown`
+fica sempre `true` aqui, já que o registro de participantes ficou
+deliberadamente fora de escopo na Fundação 8.0 (Feature_thumbnail.md seção
+16 permite esse fallback explicitamente).
 """
+
+from typing import List
 
 from app.analysis import AnalysisRow
 from app.brands import Brand
 from app.project import Project
+
+_MAX_HEADLINE_OPTIONS = 3
 
 _RESTRICOES_PADRAO = [
     "Não inventar participantes.",
@@ -64,3 +69,22 @@ def build_briefing(row: AnalysisRow, project: Project, brand: Brand) -> str:
     ]
     lines.extend(f"- {restricao}" for restricao in restricoes)
     return "\n".join(lines) + "\n"
+
+
+def build_headline_options(row: AnalysisRow) -> List[str]:
+    """Até 3 candidatas de headline, derivadas mecanicamente de campos do CSV.
+
+    Nenhum texto novo é gerado — só seleção/deduplicação de campos que já
+    passaram por revisão humana. A primeira opção (`options[0]`) é sempre a
+    usada automaticamente enquanto não houver seleção manual/IA.
+    """
+    candidates = [row.titulo_sugerido, row.pergunta_principal, row.tema_principal]
+
+    options: List[str] = []
+    for candidate in candidates:
+        candidate = candidate.strip()
+        if candidate and candidate not in options:
+            options.append(candidate)
+        if len(options) == _MAX_HEADLINE_OPTIONS:
+            break
+    return options

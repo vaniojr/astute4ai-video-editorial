@@ -34,7 +34,12 @@ from app.project import (
     update_status,
 )
 from app.thumbnail_frames import ThumbnailFramesError
-from app.thumbnail_service import ThumbnailServiceError, generate_thumbnail_briefing, plan_thumbnail
+from app.thumbnail_service import (
+    ThumbnailServiceError,
+    generate_thumbnail,
+    plan_thumbnail,
+    select_thumbnail_version,
+)
 from app.timestamps import format_hms
 from app.transcriber import TranscriptionError, transcribe_project
 
@@ -400,9 +405,11 @@ def thumbnail(
         False, "--force", help="Gerar novamente mesmo se já existir frames/briefing para este capítulo."
     ),
 ) -> None:
-    """Extrai frames reais do corte e gera o briefing editorial da thumbnail.
+    """Extrai frames reais do corte, gera o briefing editorial e (com um provider
+    de imagem configurado) as thumbnails candidatas.
 
-    Fase 9.1: sem geração de imagem ainda — só frames + briefing (modo manual).
+    Com `--provider manual` (padrão por enquanto), nenhuma imagem é gerada —
+    só frames + briefing + opções de headline, prontos para uso manual.
     """
     settings = load_settings()
     try:
@@ -428,7 +435,7 @@ def thumbnail(
 
     typer.echo(f"Extraindo {plan.frame_count} frames de '{plan.cut_path.name}'...")
     try:
-        result = generate_thumbnail_briefing(
+        result = generate_thumbnail(
             project_dir, settings, chapter=chapter, provider=provider, force=force
         )
     except (ThumbnailServiceError, ThumbnailFramesError, AnalysisError) as exc:
@@ -445,6 +452,43 @@ def thumbnail(
     typer.echo(f"- {len(result.frame_paths)} frame(s) em frames/")
     typer.echo("- briefing.md")
     typer.echo("- metadata.json")
+    if result.image_paths:
+        typer.echo(f"- {len(result.image_paths)} thumbnail(s) gerada(s):")
+        for image_path in result.image_paths:
+            typer.echo(f"  {image_path.name}")
+        typer.echo("")
+        typer.echo(
+            f"Use 'video-editorial thumbnail-select {project_dir.name} --chapter {chapter} "
+            "--version N' para aprovar uma versão."
+        )
+    else:
+        typer.echo("")
+        typer.echo(f"Nenhuma imagem gerada — provider '{plan.provider}' configurado.")
+        typer.echo("Frames e briefing estão prontos para uso manual.")
+
+
+@app.command(name="thumbnail-select")
+def thumbnail_select(
+    project: str = typer.Argument(..., help="Nome do diretório em projetos/ ou caminho do projeto."),
+    chapter: int = typer.Option(..., "--chapter", help="Número do capítulo (Capitulo no CSV)."),
+    version: int = typer.Option(..., "--version", help="Número da versão gerada (ex.: 2 para thumbnail_v002.png)."),
+) -> None:
+    """Marca uma versão da thumbnail gerada como aprovada (grava thumbs/.../selected.png)."""
+    settings = load_settings()
+    try:
+        project_dir = resolve_project_dir(project, settings)
+    except ProjectNotFoundError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1)
+
+    try:
+        result = select_thumbnail_version(project_dir, settings, chapter=chapter, version=version)
+    except (ThumbnailServiceError, AnalysisError) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1)
+
+    typer.echo(f"Thumbnail v{version:03d} selecionada para o capítulo {chapter}:")
+    typer.echo(str(result.selected_path))
 
 
 @app.command()
@@ -541,6 +585,8 @@ def _print_thumbnail_plan(plan) -> None:
     typer.echo(f"{plan.brand.thumbnail.width}x{plan.brand.thumbnail.height}")
     typer.echo("Provider:")
     typer.echo(plan.provider)
+    typer.echo("Versões existentes:")
+    typer.echo(str(plan.existing_image_versions))
     typer.echo("")
     typer.echo("DRY RUN")
     typer.echo("Nenhuma imagem final será gerada.")

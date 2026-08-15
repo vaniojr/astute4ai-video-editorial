@@ -6,9 +6,10 @@ e lives. Veja `docs/PRD_Video_Editorial.md` para a visão completa do produto.
 Status atual: pipeline completo da Fase 1 do PRD (`init`, `download`,
 `audio`, `transcribe`, `cut`, `status`), automação da análise editorial via
 LLM (`analyze`, Fase A), a Fundação compartilhada (Entrega 8.0 — Brand
-Profile, versionamento, status por capítulo) e o início da geração de
-thumbnails (Entrega 9.1 — `thumbnail`: frames reais + briefing, ainda sem
-geração de imagem). Veja
+Profile, versionamento, status por capítulo) e a geração de thumbnails
+(Entrega 9.x — `thumbnail`/`thumbnail-select`: frames reais, briefing,
+opções de headline, abstração de provider de imagem e fluxo de aprovação
+— ainda sem nenhum provider de imagem real conectado). Veja
 [docs/PIPELINE.md](docs/PIPELINE.md) para o passo a passo de ponta a ponta,
 [docs/RELEASE_NOTES.md](docs/RELEASE_NOTES.md) para os destaques de cada
 versão e [docs/CHANGELOG.md](docs/CHANGELOG.md) para o histórico detalhado
@@ -203,30 +204,44 @@ uv run video-editorial thumbnail "projetos/2026-08-12_slug_ID" --chapter 8
 ```
 
 Extrai 9 frames reais do corte já gerado (`cortes/`, nunca do vídeo
-original — o corte já está no intervalo certo) e gera um `briefing.md`
+original — o corte já está no intervalo certo), gera um `briefing.md`
 editorial determinístico a partir da linha do `03 Analise.csv` e do Brand
-Profile do projeto — **ainda sem geração de imagem** (Fase 9.1; conectar um
-provider de imagem fica para uma entrega futura).
+Profile do projeto, e (com um provider de geração de imagem configurado)
+as thumbnails candidatas em si.
 
 - Exige que o corte do capítulo já exista (`cortes/...`) — roda `cut`
   primeiro se faltar.
 - `--dry-run`: mostra projeto/capítulo/intervalo/tema/brand/quantidade de
-  frames/tamanho da thumbnail configurado, **sem chamar FFmpeg**.
+  frames/tamanho da thumbnail configurado/versões já existentes, **sem
+  chamar FFmpeg nem o provider**.
 - Idempotente: se `thumbs/<corte>/metadata.json` já existe, não gera de
-  novo — use `--force`.
-- `--provider manual` é a única opção por enquanto (a única disponível
-  antes de um provider de geração de imagem existir).
-- Texto principal sugerido reaproveita `Titulo Sugerido` do CSV (já
-  revisado por humano) — nenhuma IA gera headline nesta fase.
-  `participants_unknown` sempre `true` no `metadata.json`: sem registro de
-  participantes ainda, a ferramenta nunca inventa nome.
-- Saída em `thumbs/<mesmo-nome-base-do-corte>/`: `frames/frame-01.jpg`...`frame-09.jpg`,
-  `briefing.md`, `metadata.json`.
+  novo — use `--force` (nunca sobrescreve uma imagem já gerada; cada
+  execução real cria uma versão nova).
+- `--provider manual` é a única opção disponível por enquanto — não gera
+  nenhuma imagem, só avisa claramente e deixa frames + briefing prontos
+  para uso manual (`app/thumbnail_provider.py` não importa nenhum SDK de
+  geração de imagem ainda).
+- Texto principal e até 3 opções de headline (`headline_options` no
+  `metadata.json`) reaproveitam campos do CSV já revisados por humano
+  (`Titulo Sugerido`, `Pergunta Principal`, `Tema Principal`) — nenhuma IA
+  inventa texto nesta fase. `participants_unknown` sempre `true`: sem
+  registro de participantes ainda, a ferramenta nunca inventa nome.
+- Saída em `thumbs/<mesmo-nome-base-do-corte>/`: `frames/frame-01.jpg`...
+  `frame-09.jpg`, `briefing.md`, `metadata.json`, e (quando um provider
+  real gerar imagem) `thumbnail_v001.png`, `thumbnail_v002.png`...
+
+```bash
+uv run video-editorial thumbnail-select "projetos/2026-08-12_slug_ID" --chapter 8 --version 2
+```
+
+Aprova manualmente uma das versões geradas — copia `thumbnail_v002.png`
+para `selected.png` e atualiza `metadata.json` (`"selected"`,
+`"status": "selected"`). Nunca é escolhido automaticamente.
 
 ## Logs e progresso
 
 Toda execução de `init`/`download`/`audio`/`transcribe`/`analyze`/`cut`/
-`thumbnail` grava em `logs/pipeline.log` (uma linha JSON por evento): timestamp, etapa,
+`thumbnail`/`thumbnail-select` grava em `logs/pipeline.log` (uma linha JSON por evento): timestamp, etapa,
 comando, resultado (`iniciado`/`ok`/`erro`), erro (quando houver) e
 `duracao_segundos`. A linha `iniciado` é gravada antes de qualquer trabalho
 pesado começar — se o processo travar ou for encerrado no meio, ela já fica

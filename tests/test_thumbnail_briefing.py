@@ -3,7 +3,7 @@ from datetime import date, datetime
 from app.analysis import AnalysisRow
 from app.brands import Brand, BrandAssets, BrandColors, BrandFeatures, BrandThumbnailConfig, BrandVideoConfig
 from app.project import Project
-from app.thumbnail_briefing import build_briefing
+from app.thumbnail_briefing import build_briefing, build_headline_options
 
 
 def _row(**overrides):
@@ -93,3 +93,43 @@ def test_build_briefing_adds_validation_note_when_observacoes_flagged():
     briefing = build_briefing(_row(observacoes="Conteúdo sensível."), _project(), _brand())
 
     assert "sinalizado para validação" in briefing
+
+
+def test_build_headline_options_returns_distinct_csv_fields_in_order():
+    options = build_headline_options(_row())
+
+    assert options == [
+        "Não vou ser usado pelo Centrão",
+        "Como formar maioria?",
+        "Governabilidade",
+    ]
+
+
+def test_build_headline_options_deduplicates_repeated_values():
+    options = build_headline_options(
+        _row(titulo_sugerido="Mesmo texto", pergunta_principal="Mesmo texto", tema_principal="Tema único")
+    )
+
+    assert options == ["Mesmo texto", "Tema único"]
+
+
+def test_build_headline_options_skips_empty_fields():
+    options = build_headline_options(
+        _row(titulo_sugerido="", pergunta_principal="", tema_principal="Único tema disponível")
+    )
+
+    assert options == ["Único tema disponível"]
+
+
+def test_build_headline_options_returns_empty_list_when_no_fields_filled():
+    options = build_headline_options(_row(titulo_sugerido="", pergunta_principal="", tema_principal=""))
+
+    assert options == []
+
+
+def test_build_headline_options_caps_at_three():
+    options = build_headline_options(
+        _row(titulo_sugerido="Um", pergunta_principal="Dois", tema_principal="Três")
+    )
+
+    assert len(options) == 3

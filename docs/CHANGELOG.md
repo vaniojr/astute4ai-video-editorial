@@ -8,6 +8,39 @@ correspondente (`git show <hash>`) ou o `docs/PRD_Video_Editorial*.md` da
 época. Para um resumo por versão (menos técnico), veja
 [RELEASE_NOTES.md](RELEASE_NOTES.md).
 
+## 2026-08-15 — Thumbnail: abstração de provider, versionamento e aprovação
+
+- `app/thumbnail_provider.py` (novo): `ThumbnailProvider` (ABC) +
+  `get_thumbnail_provider()` (factory), mesmo padrão de
+  `AnalysisProvider`/`get_analysis_provider()`. Contrato
+  `ThumbnailRequest(reference_images, briefing, aspect_ratio="16:9",
+  brand)` já pronto para múltiplas imagens de referência. `manual`
+  continua sendo a única implementação — nunca gera imagem, nunca importa
+  nenhum SDK de geração de imagem (nem OpenAI, nem Google, nem nenhum
+  outro) enquanto nenhum provider real for escolhido.
+- Provider só devolve bytes de imagem — quem decide nome de arquivo e
+  aplica versionamento (`app/versioning.py`, `thumbnail_v001.png`,
+  `v002.png`...) é `app/thumbnail_service.py`, mesma separação que
+  `app/cutter.py` já usa para os cortes.
+- Novo comando `video-editorial thumbnail-select PROJECT --chapter N
+  --version N`: copia a versão escolhida para `selected.png` e marca
+  `metadata.json` (`"selected"`, `"status": "selected"`) — aprovação
+  sempre explícita, nunca automática.
+- `metadata.json` ganha `headline_options` (até 3 candidatas derivadas
+  mecanicamente de `Titulo Sugerido`/`Pergunta Principal`/`Tema
+  Principal`, deduplicadas — nenhum texto novo é inventado, só
+  selecionado entre campos já revisados por humano), `images` e
+  `selected`.
+- `thumbnail --dry-run` agora também mostra quantas versões de imagem já
+  existem para o capítulo.
+- `generate_thumbnail_briefing()`/`ThumbnailBriefingResult` renomeados
+  para `generate_thumbnail()`/`ThumbnailGenerationResult` — o nome
+  antigo não refletia mais o escopo (agora cobre frames + briefing +
+  tentativa de geração de imagem).
+- Validado manualmente com FFmpeg real de ponta a ponta, incluindo
+  `thumbnail-select` contra arquivos de imagem fabricados à mão
+  (simulando o que um provider real produziria).
+
 ## 2026-08-15 — Entrega 9.1: Thumbnail — frames + briefing (modo manual)
 
 - Novo comando `video-editorial thumbnail PROJECT --chapter N [--dry-run]

@@ -4,6 +4,17 @@ Resumo em destaques do que cada versão trouxe, pensado para leitura rápida —
 "o que dá pra fazer agora que não dava antes". Para detalhe técnico
 (arquivos, commits, decisões), veja [CHANGELOG.md](CHANGELOG.md).
 
+## v0.5.0 — 2026-08-15
+
+- **Thumbnail: pronto para conectar um provider de imagem real**: a
+  abstração (`ThumbnailProvider`), o versionamento (`thumbnail_v001.png`,
+  `v002.png`...) e o fluxo de aprovação manual (novo comando
+  `thumbnail-select`) já existem — falta só escolher e integrar um
+  provider (OpenAI, Google, etc.), sem mexer no resto do pipeline.
+- **Opções de headline no briefing**: `metadata.json` agora sugere até 3
+  títulos candidatos, sempre reaproveitando texto já revisado por humano
+  no CSV.
+
 ## v0.4.0 — 2026-08-15
 
 - **Geração de thumbnails, primeira etapa**: novo comando `thumbnail`
