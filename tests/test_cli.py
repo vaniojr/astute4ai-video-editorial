@@ -6,6 +6,7 @@ from typer.testing import CliRunner
 from app import project as project_module
 from app.analysis import AnalysisError, AnalysisRow, ChapterReport, DryRunReport
 from app.audio import AudioError, AudioResult
+from app.cutter import CutOutcome, CutRunResult, CutterError
 from app.downloader import DownloadError, DownloadResult
 from app.metadata import MetadataError, VideoMetadata
 from app.transcriber import TranscribeResult, TranscriptionError
@@ -274,12 +275,119 @@ def test_cut_dry_run_prints_report_and_advances_status(tmp_path, monkeypatch):
     assert data["status"] == "analyzed"
 
 
-def test_cut_without_dry_run_reports_not_implemented(tmp_path, monkeypatch):
+def _report_with_chapters(project_dir, chapters):
+    return DryRunReport(
+        project_dir=project_dir,
+        video_path=project_dir / "original" / "video-original.mp4",
+        video_duration_seconds=6303.0,
+        csv_path=project_dir / "03 Analise.csv",
+        chapters=chapters,
+        warnings=[],
+    )
+
+
+def test_cut_generates_real_cuts_and_advances_status(tmp_path, monkeypatch):
     project_dir = _create_project(tmp_path, monkeypatch)
+    row = AnalysisRow(ordem_publicacao="1", capitulo="08", acao_editorial="Manter", titulo_sugerido="Titulo")
+    chapter = ChapterReport(row=row, status="ok", start_seconds=1747.0, end_seconds=2242.0)
+    report = _report_with_chapters(project_dir, [chapter])
+    monkeypatch.setattr(cli_main, "build_dry_run_report", lambda pdir: report)
+
+    output_path = project_dir / "cortes" / "001_cap08_titulo.mp4"
+
+    def _fake_generate_cuts(rep, pdir, settings, mode="precise"):
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_bytes(b"fake")
+        outcome = CutOutcome(chapter=rep.chapters[0], status="cut", output_path=output_path)
+        return CutRunResult(outcomes=[outcome])
+
+    monkeypatch.setattr(cli_main, "generate_cuts", _fake_generate_cuts)
+
+    result = runner.invoke(app, ["cut", str(project_dir)])
+
+    assert result.exit_code == 0
+    assert "Cortes gerados:" in result.stdout
+    assert "[CORTADO] Capítulo 08" in result.stdout
+    data = json.loads((project_dir / "project.json").read_text(encoding="utf-8"))
+    assert data["status"] == "cut"
+
+
+def test_cut_does_not_advance_status_when_nothing_cut(tmp_path, monkeypatch):
+    project_dir = _create_project(tmp_path, monkeypatch)
+    row = AnalysisRow(ordem_publicacao="1", capitulo="08", acao_editorial="Unir")
+    chapter = ChapterReport(row=row, status="manual_action", message="requer edição manual")
+    report = _report_with_chapters(project_dir, [chapter])
+    monkeypatch.setattr(cli_main, "build_dry_run_report", lambda pdir: report)
+
+    def _fake_generate_cuts(rep, pdir, settings, mode="precise"):
+        outcome = CutOutcome(chapter=rep.chapters[0], status="skipped_ineligible")
+        return CutRunResult(outcomes=[outcome])
+
+    monkeypatch.setattr(cli_main, "generate_cuts", _fake_generate_cuts)
+
+    result = runner.invoke(app, ["cut", str(project_dir)])
+
+    assert result.exit_code == 0
+    data = json.loads((project_dir / "project.json").read_text(encoding="utf-8"))
+    assert data["status"] == "created"
+
+
+def test_cut_fast_mode_prints_keyframe_warning(tmp_path, monkeypatch):
+    project_dir = _create_project(tmp_path, monkeypatch)
+    row = AnalysisRow(ordem_publicacao="1", capitulo="08", acao_editorial="Manter")
+    chapter = ChapterReport(row=row, status="ok", start_seconds=0.0, end_seconds=10.0)
+    report = _report_with_chapters(project_dir, [chapter])
+    monkeypatch.setattr(cli_main, "build_dry_run_report", lambda pdir: report)
+    monkeypatch.setattr(
+        cli_main,
+        "generate_cuts",
+        lambda rep, pdir, settings, mode="precise": CutRunResult(outcomes=[]),
+    )
+
+    result = runner.invoke(app, ["cut", str(project_dir), "--mode", "fast"])
+
+    assert result.exit_code == 0
+    assert "Modo rápido utiliza keyframes" in result.stdout
+
+
+def test_cut_reports_cutter_errors(tmp_path, monkeypatch):
+    project_dir = _create_project(tmp_path, monkeypatch)
+    row = AnalysisRow(ordem_publicacao="1", capitulo="08", acao_editorial="Manter")
+    chapter = ChapterReport(row=row, status="ok", start_seconds=0.0, end_seconds=10.0)
+    report = _report_with_chapters(project_dir, [chapter])
+    monkeypatch.setattr(cli_main, "build_dry_run_report", lambda pdir: report)
+
+    def _raise(rep, pdir, settings, mode="precise"):
+        raise CutterError("mensagem acionável")
+
+    monkeypatch.setattr(cli_main, "generate_cuts", _raise)
 
     result = runner.invoke(app, ["cut", str(project_dir)])
 
     assert result.exit_code == 1
+
+
+def test_cut_applies_chapter_filter(tmp_path, monkeypatch):
+    project_dir = _create_project(tmp_path, monkeypatch)
+    row_a = AnalysisRow(ordem_publicacao="1", capitulo="08", acao_editorial="Manter")
+    row_b = AnalysisRow(ordem_publicacao="2", capitulo="14", acao_editorial="Manter")
+    chapter_a = ChapterReport(row=row_a, status="ok", start_seconds=0.0, end_seconds=10.0)
+    chapter_b = ChapterReport(row=row_b, status="ok", start_seconds=20.0, end_seconds=30.0)
+    report = _report_with_chapters(project_dir, [chapter_a, chapter_b])
+    monkeypatch.setattr(cli_main, "build_dry_run_report", lambda pdir: report)
+
+    captured = {}
+
+    def _fake_generate_cuts(rep, pdir, settings, mode="precise"):
+        captured["chapters"] = rep.chapters
+        return CutRunResult(outcomes=[])
+
+    monkeypatch.setattr(cli_main, "generate_cuts", _fake_generate_cuts)
+
+    runner.invoke(app, ["cut", str(project_dir), "--chapter", "14"])
+
+    assert len(captured["chapters"]) == 1
+    assert captured["chapters"][0].row.capitulo == "14"
 
 
 def test_cut_dry_run_reports_analysis_errors(tmp_path, monkeypatch):

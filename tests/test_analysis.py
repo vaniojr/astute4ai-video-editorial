@@ -4,7 +4,15 @@ from dataclasses import dataclass
 import pytest
 
 from app import analysis as analysis_module
-from app.analysis import AnalysisError, build_dry_run_report, classify_action, load_analysis
+from app.analysis import (
+    AnalysisError,
+    AnalysisRow,
+    ChapterReport,
+    build_dry_run_report,
+    classify_action,
+    filter_chapters,
+    load_analysis,
+)
 
 _HEADERS = [
     "Ordem Publicacao",
@@ -364,3 +372,53 @@ def test_build_dry_run_report_flags_overlapping_ranges(tmp_path, monkeypatch):
     report = build_dry_run_report(project_dir)
 
     assert any("Sobreposição" in w for w in report.warnings)
+
+
+def _chapter(**overrides):
+    defaults = dict(ordem_publicacao="1", capitulo="1", prioridade="A")
+    defaults.update(overrides)
+    row = AnalysisRow(**defaults)
+    return ChapterReport(row=row, status="ok", start_seconds=0.0, end_seconds=10.0)
+
+
+def test_filter_chapters_without_filters_returns_all():
+    chapters = [_chapter(capitulo="1"), _chapter(capitulo="2")]
+    assert filter_chapters(chapters) == chapters
+
+
+def test_filter_chapters_by_priority_is_case_insensitive():
+    chapters = [_chapter(prioridade="A"), _chapter(prioridade="b")]
+    result = filter_chapters(chapters, priority="a")
+    assert len(result) == 1
+    assert result[0].row.prioridade == "A"
+
+
+def test_filter_chapters_by_chapter_number():
+    chapters = [_chapter(capitulo="8"), _chapter(capitulo="14")]
+    result = filter_chapters(chapters, chapter=14)
+    assert len(result) == 1
+    assert result[0].row.capitulo == "14"
+
+
+def test_filter_chapters_by_order():
+    chapters = [_chapter(ordem_publicacao="1"), _chapter(ordem_publicacao="2")]
+    result = filter_chapters(chapters, order=2)
+    assert len(result) == 1
+    assert result[0].row.ordem_publicacao == "2"
+
+
+def test_filter_chapters_combines_filters_with_and():
+    chapters = [
+        _chapter(capitulo="8", prioridade="A"),
+        _chapter(capitulo="8", prioridade="B"),
+        _chapter(capitulo="14", prioridade="A"),
+    ]
+    result = filter_chapters(chapters, chapter=8, priority="A")
+    assert len(result) == 1
+    assert result[0].row.capitulo == "8"
+    assert result[0].row.prioridade == "A"
+
+
+def test_filter_chapters_by_chapter_ignores_non_numeric_capitulo():
+    chapters = [_chapter(capitulo="abc")]
+    assert filter_chapters(chapters, chapter=8) == []

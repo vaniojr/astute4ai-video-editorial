@@ -1,11 +1,23 @@
 """CLI do video-editorial (PRD seção 24)."""
 
+from dataclasses import replace
+from enum import Enum
+from typing import Optional
+
 import typer
 
-from app.analysis import AnalysisError, DryRunReport, build_dry_run_report
+from app.analysis import (
+    AnalysisError,
+    ChapterReport,
+    DryRunReport,
+    build_dry_run_report,
+    filter_chapters,
+)
 from app.audio import AudioError, extract_audio
 from app.config import load_settings
+from app.cutter import CutRunResult, CutterError, generate_cuts
 from app.downloader import DownloadError, download_video
+from app.logging_utils import log_event
 from app.metadata import MetadataError
 from app.project import (
     ProjectNotFoundError,
@@ -19,6 +31,11 @@ from app.timestamps import format_hms
 from app.transcriber import TranscriptionError, transcribe_project
 
 app = typer.Typer(help="Ferramenta local para produção editorial de vídeos.")
+
+
+class CutMode(str, Enum):
+    precise = "precise"
+    fast = "fast"
 
 
 @app.callback()
@@ -146,6 +163,12 @@ def cut(
     dry_run: bool = typer.Option(
         False, "--dry-run", help="Valida 03 Analise.csv e mostra os cortes elegíveis, sem gerar vídeos."
     ),
+    mode: CutMode = typer.Option(
+        CutMode.precise, "--mode", help="'precise' (padrão, re-encoding) ou 'fast' (-c copy)."
+    ),
+    priority: Optional[str] = typer.Option(None, "--priority", help="Filtra por Prioridade (ex.: A)."),
+    chapter: Optional[int] = typer.Option(None, "--chapter", help="Filtra por Capitulo."),
+    order: Optional[int] = typer.Option(None, "--order", help="Filtra por Ordem Publicacao."),
 ) -> None:
     """Gera os cortes definidos em 03 Analise.csv."""
     settings = load_settings()
@@ -155,38 +178,55 @@ def cut(
         typer.echo(str(exc), err=True)
         raise typer.Exit(code=1)
 
-    if not dry_run:
-        typer.echo(
-            "A geração real dos cortes ainda não está implementada nesta versão.\n\n"
-            "Use 'video-editorial cut PROJECT --dry-run' para validar 03 Analise.csv "
-            "e ver os cortes elegíveis.",
-            err=True,
-        )
-        raise typer.Exit(code=1)
-
     try:
         report = build_dry_run_report(project_dir)
     except AnalysisError as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(code=1)
 
-    _print_dry_run_report(report)
-    advance_status(project_dir, "analyzed")
+    filtered_chapters = filter_chapters(report.chapters, priority=priority, chapter=chapter, order=order)
+    report = replace(report, chapters=filtered_chapters)
+
+    comando = (
+        f"cut {project} --dry-run={dry_run} --mode={mode.value} "
+        f"--priority={priority} --chapter={chapter} --order={order}"
+    )
+
+    if dry_run:
+        _print_dry_run_report(report)
+        advance_status(project_dir, "analyzed")
+        log_event(project_dir, etapa="cut", comando=comando, resultado="ok")
+        return
+
+    if mode == CutMode.fast:
+        typer.echo(
+            "Modo rápido utiliza keyframes e pode não iniciar exatamente no timestamp editorial.\n"
+        )
+
+    try:
+        cut_result = generate_cuts(report, project_dir, settings, mode=mode.value)
+    except CutterError as exc:
+        log_event(project_dir, etapa="cut", comando=comando, resultado="erro", erro=str(exc))
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1)
+
+    _print_cut_report(report, cut_result)
+
+    has_errors = any(outcome.status == "error" for outcome in cut_result.outcomes)
+    log_event(
+        project_dir,
+        etapa="cut",
+        comando=comando,
+        resultado="erro" if has_errors else "ok",
+        erro="uma ou mais linhas falharam; ver relatório" if has_errors else None,
+    )
+
+    if cut_result.cut_count > 0:
+        advance_status(project_dir, "cut")
 
 
 def _print_dry_run_report(report: DryRunReport) -> None:
-    typer.echo("Projeto:")
-    typer.echo(report.project_dir.name)
-    typer.echo("")
-    typer.echo("Vídeo:")
-    typer.echo(str(report.video_path.relative_to(report.project_dir)))
-    typer.echo("")
-    typer.echo("Duração:")
-    typer.echo(format_hms(report.video_duration_seconds))
-    typer.echo("")
-    typer.echo("CSV:")
-    typer.echo(report.csv_path.name)
-    typer.echo("")
+    _print_report_header(report)
     typer.echo("Cortes elegíveis:")
     typer.echo(str(report.eligible_count))
 
@@ -201,16 +241,65 @@ def _print_dry_run_report(report: DryRunReport) -> None:
             typer.echo(f"Duração: {format_hms(chapter.end_seconds - chapter.start_seconds)}")
             if chapter.message:
                 typer.echo(f"Nota: {chapter.message}")
-        elif chapter.status == "ambiguous":
-            typer.echo(f"[AMBÍGUO] Capítulo {chapter.row.capitulo}")
-            typer.echo(chapter.message)
-        elif chapter.status == "manual_action":
-            typer.echo(f"[AVISO] Capítulo {chapter.row.capitulo}")
-            typer.echo(chapter.message)
-        elif chapter.status == "error":
-            typer.echo(f"[ERRO] Capítulo {chapter.row.capitulo}")
-            typer.echo(chapter.message)
+        else:
+            _print_ineligible_chapter(chapter)
 
+    _print_warnings(report)
+
+
+def _print_cut_report(report: DryRunReport, cut_result: CutRunResult) -> None:
+    _print_report_header(report)
+    typer.echo("Cortes gerados:")
+    typer.echo(str(cut_result.cut_count))
+
+    for outcome in cut_result.outcomes:
+        chapter = outcome.chapter
+        if outcome.status == "skipped_ineligible" and chapter.status == "discarded":
+            continue
+        typer.echo("")
+        if outcome.status == "cut":
+            typer.echo(f"[CORTADO] Capítulo {chapter.row.capitulo}")
+            typer.echo(outcome.output_path.name)
+        elif outcome.status == "skipped_exists":
+            typer.echo(f"[PULADO] Capítulo {chapter.row.capitulo} (arquivo já existe)")
+            typer.echo(outcome.output_path.name)
+        elif outcome.status == "error":
+            typer.echo(f"[ERRO] Capítulo {chapter.row.capitulo}")
+            typer.echo(outcome.message)
+        else:  # skipped_ineligible (ambíguo/aviso/erro de validação)
+            _print_ineligible_chapter(chapter)
+
+    _print_warnings(report)
+
+
+def _print_report_header(report: DryRunReport) -> None:
+    typer.echo("Projeto:")
+    typer.echo(report.project_dir.name)
+    typer.echo("")
+    typer.echo("Vídeo:")
+    typer.echo(str(report.video_path.relative_to(report.project_dir)))
+    typer.echo("")
+    typer.echo("Duração:")
+    typer.echo(format_hms(report.video_duration_seconds))
+    typer.echo("")
+    typer.echo("CSV:")
+    typer.echo(report.csv_path.name)
+    typer.echo("")
+
+
+def _print_ineligible_chapter(chapter: ChapterReport) -> None:
+    if chapter.status == "ambiguous":
+        typer.echo(f"[AMBÍGUO] Capítulo {chapter.row.capitulo}")
+        typer.echo(chapter.message)
+    elif chapter.status == "manual_action":
+        typer.echo(f"[AVISO] Capítulo {chapter.row.capitulo}")
+        typer.echo(chapter.message)
+    elif chapter.status == "error":
+        typer.echo(f"[ERRO] Capítulo {chapter.row.capitulo}")
+        typer.echo(chapter.message)
+
+
+def _print_warnings(report: DryRunReport) -> None:
     if report.warnings:
         typer.echo("")
         typer.echo("Avisos:")

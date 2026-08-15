@@ -145,6 +145,36 @@ class DryRunReport:
         return sum(1 for chapter in self.chapters if chapter.status == "ok")
 
 
+def filter_chapters(
+    chapters: List[ChapterReport],
+    *,
+    priority: Optional[str] = None,
+    chapter: Optional[int] = None,
+    order: Optional[int] = None,
+) -> List[ChapterReport]:
+    """Filtra capítulos por Prioridade/Capitulo/Ordem Publicacao (PRD seção 19).
+
+    Filtros combinam em AND quando mais de um é informado. `None` desativa
+    o respectivo filtro.
+    """
+    result = chapters
+    if priority is not None:
+        normalized = priority.strip().lower()
+        result = [c for c in result if c.row.prioridade.strip().lower() == normalized]
+    if chapter is not None:
+        result = [c for c in result if _safe_int(c.row.capitulo) == chapter]
+    if order is not None:
+        result = [c for c in result if _safe_int(c.row.ordem_publicacao) == order]
+    return result
+
+
+def _safe_int(value: str) -> Optional[int]:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def build_dry_run_report(project_dir: Path) -> DryRunReport:
     video_path = project_dir / "original" / "video-original.mp4"
     if not video_path.exists():

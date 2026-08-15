@@ -3,10 +3,10 @@
 Ferramenta local para apoiar a produção editorial de vídeos longos, podcasts
 e lives. Veja `PRD_Video_Editorial.md` para a visão completa do produto.
 
-Status atual: **Entrega 5 — CSV**. Criação de projetos (`init`), download
+Status atual: **Entrega 6 — Cortes**. Criação de projetos (`init`), download
 do vídeo original (`download`), extração de áudio (`audio`), transcrição
-(`transcribe`) e validação/dry-run da análise editorial (`cut --dry-run`)
-estão implementados. A geração real dos cortes pertence à próxima entrega.
+(`transcribe`) e validação/geração dos cortes (`cut`) estão implementados —
+o pipeline descrito na Fase 1 do PRD está completo.
 
 ## Setup
 
@@ -92,15 +92,37 @@ Colunas reconhecidas (nomes exatos, qualquer ordem):
   automaticamente; aparece como `[AVISO]` no relatório.
 
 Timestamps aceitam `MM:SS`, `H:MM:SS`, e as variantes que planilhas geram
-ao exportar (`MM:SS:00`, `H:MM:SS:00`). Quando um valor como `29:07:00` é
-ambíguo entre "29 horas" e "29 minutos", o sistema usa a duração real do
-vídeo para escolher a única leitura plausível e reporta a correção
-explicitamente no relatório; só marca `[AMBÍGUO]` (sem cortar aquele
-registro) quando as duas leituras cabem na duração do vídeo, nenhuma cabe,
-ou a duração não pôde ser obtida.
+ao exportar (`MM:SS:00`, `H:MM:SS:00`). O sistema sempre confia na leitura
+literal H:MM:SS quando ela cabe na duração do vídeo (ex.: `00:05:00` = 5
+minutos, sem ambiguidade); só quando essa leitura excede a duração é que
+tenta a leitura MM:SS corrigida (ex.: `29:07:00` → `00:29:07`, já que 29h
+não caberia), reportando a correção explicitamente no relatório. Só marca
+`[AMBÍGUO]` (sem cortar aquele registro) quando nem a leitura H:MM:SS nem a
+MM:SS cabem na duração do vídeo, ou quando não há duração de referência.
 
-Sem `--dry-run`, `cut` ainda não gera cortes reais (reservado para a
-próxima entrega).
+```bash
+uv run video-editorial cut "projetos/2026-08-12_slug_ID"
+```
+
+Gera os cortes de todas as linhas elegíveis (`[OK]` no dry-run) em
+`cortes/`, no formato `{ordem:03d}_cap{capitulo:02d}_{slug}.mp4` (o `slug`
+vem de `Titulo Sugerido`, com `Tema Principal` como alternativa). Modo
+padrão (`precise`): re-encoding em H.264/AAC (CRF 18, preset `medium`,
+áudio 192 kbps, `faststart`), preservando resolução/aspect ratio/FPS da
+fonte, sem watermark/CTA/thumbnail/legenda. `--mode fast` usa `-c copy`
+(mais rápido, mas pode não iniciar exatamente no timestamp editorial — a
+CLI avisa isso).
+
+Nunca sobrescreve um corte já existente automaticamente — se o arquivo já
+existir em `cortes/`, aquele registro é marcado `[PULADO]`. Linhas
+`[AMBÍGUO]`/`[AVISO]`/`[ERRO]` continuam aparecendo no relatório, mas não
+são cortadas; um erro do FFmpeg numa linha não interrompe as demais.
+
+Filtros combináveis (seção 19 do PRD): `--priority A`, `--chapter 8`,
+`--order 14` — funcionam tanto com `--dry-run` quanto na geração real.
+
+Cada execução de `cut` grava uma linha em `logs/pipeline.log` (timestamp,
+etapa, comando, resultado e erro, quando houver).
 
 ## Testes
 
