@@ -184,3 +184,13 @@ def test_resolve_project_dir_raises_when_not_found(tmp_path):
         assert False, "deveria ter levantado ProjectNotFoundError"
     except ProjectNotFoundError:
         pass
+
+
+def test_resolve_project_dir_by_bare_source_id(tmp_path, monkeypatch):
+    settings = _settings(tmp_path)
+    monkeypatch.setattr(project_module, "fetch_metadata", lambda url: _fake_metadata())
+    result = create_project("https://www.youtube.com/watch?v=7xgE4ZHNWRU", settings)
+
+    resolved = resolve_project_dir("7xgE4ZHNWRU", settings)
+
+    assert resolved == result.path

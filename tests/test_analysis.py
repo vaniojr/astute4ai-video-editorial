@@ -120,6 +120,7 @@ def _fake_ffprobe(monkeypatch, duration_seconds):
         return _FakeCompletedProcess(returncode=0, stdout=str(duration_seconds))
 
     monkeypatch.setattr(analysis_module.subprocess, "run", _fake_run)
+    monkeypatch.setattr(analysis_module.shutil, "which", lambda name: f"/usr/bin/{name}")
 
 
 def _make_project(tmp_path, csv_rows=None, headers=_HEADERS):
@@ -146,6 +147,33 @@ def test_build_dry_run_report_raises_when_csv_missing(tmp_path, monkeypatch):
 
     with pytest.raises(AnalysisError):
         build_dry_run_report(project_dir)
+
+
+def test_build_dry_run_report_raises_when_ffprobe_missing(tmp_path, monkeypatch):
+    project_dir = _make_project(
+        tmp_path,
+        csv_rows=[
+            _row(
+                **{
+                    "Ordem Publicacao": "1",
+                    "Capitulo": "08",
+                    "Acao Editorial": "Manter",
+                    "Timestamp Inicial": "00:00:01",
+                    "Timestamp Final": "00:00:02",
+                }
+            ),
+        ],
+    )
+    monkeypatch.setattr(analysis_module.shutil, "which", lambda name: None)
+
+    def _fail_if_called(cmd, capture_output=True, text=True):
+        raise AssertionError("ffprobe não deveria ser chamado")
+
+    monkeypatch.setattr(analysis_module.subprocess, "run", _fail_if_called)
+
+    with pytest.raises(AnalysisError) as exc_info:
+        build_dry_run_report(project_dir)
+    assert "FFmpeg" in str(exc_info.value)
 
 
 def test_build_dry_run_report_marks_ok_row(tmp_path, monkeypatch):

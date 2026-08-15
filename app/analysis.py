@@ -7,6 +7,7 @@ dos cortes (FFmpeg) fica para `app/cutter.py`, na Entrega 6.
 """
 
 import csv
+import shutil
 import subprocess
 import unicodedata
 from dataclasses import dataclass, field
@@ -301,6 +302,13 @@ def _cross_row_warnings(chapters: List[ChapterReport]) -> List[str]:
 
 
 def _get_video_duration_seconds(video_path: Path) -> float:
+    if shutil.which("ffprobe") is None:
+        raise AnalysisError(
+            "FFmpeg não foi encontrado.\n\n"
+            "Instale no macOS:\n\n"
+            "brew install ffmpeg"
+        )
+
     result = subprocess.run(
         [
             "ffprobe",

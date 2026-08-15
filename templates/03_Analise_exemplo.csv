@@ -1,0 +1,3 @@
+Ordem Publicacao,Prioridade,Capitulo,Bloco Editorial,Acao Editorial,Timestamp Inicial,Timestamp Final,Duracao,Tema Principal,Titulo Sugerido,Palavra-chave Principal,Trecho para Validar Primeiro,Resumo,Pergunta Principal,Independente,Precisa Contexto Anterior,Grau de Confianca,Observacoes
+1,A,08,Bloco 1,Manter,00:29:07,00:37:22,00:08:15,Tema principal do trecho,Titulo sugerido para o corte,palavra-chave,Trecho que precisa de checagem,Resumo curto do trecho,Pergunta que o trecho responde,Sim,Nao,Alto,
+2,B,14,Bloco 2,Revisar,01:12:09,01:20:22,00:08:13,Outro tema,Outro titulo sugerido,outra-palavra,,Resumo curto do trecho,,Nao,Sim,Medio,Exemplo de acao que exige edicao manual

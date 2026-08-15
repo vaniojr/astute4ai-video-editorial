@@ -3,10 +3,10 @@
 Ferramenta local para apoiar a produção editorial de vídeos longos, podcasts
 e lives. Veja `PRD_Video_Editorial.md` para a visão completa do produto.
 
-Status atual: **Entrega 6 — Cortes**. Criação de projetos (`init`), download
-do vídeo original (`download`), extração de áudio (`audio`), transcrição
-(`transcribe`) e validação/geração dos cortes (`cut`) estão implementados —
-o pipeline descrito na Fase 1 do PRD está completo.
+Status atual: **Entrega 7 — Refinamento**. O pipeline completo da Fase 1 do
+PRD está implementado: `init`, `download`, `audio`, `transcribe`, `cut`
+(dry-run e geração real) e `status`. Veja
+[docs/PIPELINE.md](docs/PIPELINE.md) para o passo a passo de ponta a ponta.
 
 ## Setup
 
@@ -36,9 +36,12 @@ uv run video-editorial download "projetos/2026-08-12_slug_ID"
 
 Baixa o vídeo original (melhor qualidade disponível, vídeo+áudio combinados
 via FFmpeg) para `original/video-original.mp4`. Requer FFmpeg instalado
-(`brew install ffmpeg` no macOS). `PROJECT` pode ser o nome do diretório
-dentro de `projetos/` ou um caminho explícito (relativo, absoluto ou `.`
-quando executado de dentro do projeto).
+(`brew install ffmpeg` no macOS).
+
+Em todos os comandos, `PROJECT` aceita o nome do diretório dentro de
+`projetos/`, um caminho explícito (relativo, absoluto ou `.` quando
+executado de dentro do projeto), ou o `source_id` isolado do vídeo (ex.:
+`video-editorial status 7xgE4ZHNWRU`, sem precisar do caminho completo).
 
 Se o arquivo já existir, nenhum download é refeito — use `--force` para
 baixar novamente e substituir o arquivo existente.
@@ -74,8 +77,10 @@ uv run video-editorial cut "projetos/2026-08-12_slug_ID" --dry-run
 
 A análise editorial (`03 Analise.csv`) ainda é produzida externamente
 (Claude no VS Code, a partir de `01 Fonte.md` e `02 Transcricao.md`) — não
-há geração automática nesta versão. O `cut --dry-run` lê esse CSV, valida
-cada linha e mostra os cortes elegíveis, **sem gerar nenhum vídeo**.
+há geração automática nesta versão. Copie
+[templates/03_Analise_exemplo.csv](templates/03_Analise_exemplo.csv) como
+ponto de partida para não errar o cabeçalho. O `cut --dry-run` lê esse CSV,
+valida cada linha e mostra os cortes elegíveis, **sem gerar nenhum vídeo**.
 
 Colunas reconhecidas (nomes exatos, qualquer ordem):
 `Ordem Publicacao`, `Prioridade`, `Capitulo`, `Bloco Editorial`,
@@ -123,6 +128,15 @@ Filtros combináveis (seção 19 do PRD): `--priority A`, `--chapter 8`,
 
 Cada execução de `cut` grava uma linha em `logs/pipeline.log` (timestamp,
 etapa, comando, resultado e erro, quando houver).
+
+```bash
+uv run video-editorial status "projetos/2026-08-12_slug_ID"
+```
+
+Mostra título, canal, URL, o `status` atual do pipeline (`created` →
+`downloaded` → `audio_ready` → `transcribed` → `analyzed` → `cut`) e quais
+artefatos já existem (vídeo original, áudio, transcrição, `03 Analise.csv`,
+quantidade de arquivos em `cortes/`).
 
 ## Testes
 

@@ -2,6 +2,7 @@
 
 from dataclasses import replace
 from enum import Enum
+from pathlib import Path
 from typing import Optional
 
 import typer
@@ -223,6 +224,44 @@ def cut(
 
     if cut_result.cut_count > 0:
         advance_status(project_dir, "cut")
+
+
+@app.command()
+def status(
+    project: str = typer.Argument(
+        ..., help="Nome do diretório em projetos/, caminho, ou source_id do vídeo."
+    ),
+) -> None:
+    """Mostra o estado atual de um projeto e a presença dos artefatos do pipeline."""
+    settings = load_settings()
+    try:
+        project_dir = resolve_project_dir(project, settings)
+    except ProjectNotFoundError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1)
+
+    proj = load_project(project_dir)
+
+    typer.echo("Projeto:")
+    typer.echo(project_dir.name)
+    typer.echo("")
+    typer.echo(f"Título: {proj.title}")
+    typer.echo(f"Canal: {proj.channel or '(não detectado)'}")
+    typer.echo(f"URL: {proj.source_url}")
+    typer.echo(f"Status: {proj.status}")
+    typer.echo("")
+    typer.echo("Artefatos:")
+    typer.echo(f"- Vídeo original: {_presence(project_dir / 'original' / 'video-original.mp4')}")
+    typer.echo(f"- Áudio: {_presence(project_dir / 'audio' / 'audio.wav')}")
+    typer.echo(f"- Transcrição: {_presence(project_dir / '02 Transcricao.md')}")
+    typer.echo(f"- Análise (03 Analise.csv): {_presence(project_dir / '03 Analise.csv')}")
+    cortes_dir = project_dir / "cortes"
+    cortes_count = len(list(cortes_dir.glob("*.mp4"))) if cortes_dir.is_dir() else 0
+    typer.echo(f"- Cortes: {cortes_count} arquivo(s) em cortes/")
+
+
+def _presence(path: Path) -> str:
+    return "presente" if path.exists() else "ausente"
 
 
 def _print_dry_run_report(report: DryRunReport) -> None:

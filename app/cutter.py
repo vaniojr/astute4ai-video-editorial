@@ -5,6 +5,7 @@ Reaproveita a validação de `app/analysis.py` (só corta linhas com
 simplesmente puladas aqui — a falha de uma linha nunca aborta as demais.
 """
 
+import shutil
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -43,6 +44,13 @@ def generate_cuts(
 ) -> CutRunResult:
     if mode not in _MODES:
         raise CutterError(f"Modo inválido: '{mode}'. Use 'precise' ou 'fast'.")
+
+    if shutil.which("ffmpeg") is None:
+        raise CutterError(
+            "FFmpeg não foi encontrado.\n\n"
+            "Instale no macOS:\n\n"
+            "brew install ffmpeg"
+        )
 
     cortes_dir = project_dir / "cortes"
     cortes_dir.mkdir(parents=True, exist_ok=True)

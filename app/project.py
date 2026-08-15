@@ -60,14 +60,19 @@ class ProjectNotFoundError(Exception):
 def resolve_project_dir(project_arg: str, settings: Settings) -> Path:
     """Resolve PROJECT para um diretório de projeto existente.
 
-    Aceita o nome do diretório dentro de `projetos/` ou um caminho explícito
-    (relativo, absoluto ou `.`). Resolução por source_id/slug fica para uma
-    entrega futura (PRD seção 25).
+    Aceita o nome do diretório dentro de `projetos/`, um caminho explícito
+    (relativo, absoluto ou `.`), ou o source_id isolado do vídeo (PRD seção 25,
+    ex.: `video-editorial status 7xgE4ZHNWRU`). Resolução por slug fica para
+    quando for pedida.
     """
     candidates = (Path(project_arg), settings.projetos_dir / project_arg)
     for candidate in candidates:
         if (candidate / "project.json").is_file():
             return candidate
+
+    by_source_id = find_existing_project(project_arg, settings.projetos_dir)
+    if by_source_id is not None:
+        return by_source_id
 
     raise ProjectNotFoundError(
         f"Projeto não encontrado: {project_arg}\n\n"

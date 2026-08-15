@@ -1,9 +1,8 @@
 """Configuração central da aplicação (PRD seção 29).
 
-Valores lidos de variáveis de ambiente quando presentes, com defaults
-sensatos caso contrário. Apenas `projetos_dir` é utilizado nesta entrega;
-os demais campos estão reservados para as entregas de áudio, transcrição
-e cortes, evitando constantes espalhadas pelo código.
+Valores lidos de variáveis de ambiente (`VIDEO_EDITORIAL_*`) quando
+presentes, com defaults sensatos caso contrário — evita constantes
+espalhadas pelo código.
 """
 
 import os

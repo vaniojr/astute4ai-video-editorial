@@ -409,3 +409,37 @@ def test_cut_reports_project_not_found(tmp_path, monkeypatch):
     result = runner.invoke(app, ["cut", "nao-existe", "--dry-run"])
 
     assert result.exit_code == 1
+
+
+def test_status_shows_project_info_and_missing_artifacts(tmp_path, monkeypatch):
+    project_dir = _create_project(tmp_path, monkeypatch)
+
+    result = runner.invoke(app, ["status", str(project_dir)])
+
+    assert result.exit_code == 0
+    assert "Status: created" in result.stdout
+    assert "Podcast 3 Irmãos" in result.stdout
+    assert "- Vídeo original: ausente" in result.stdout
+    assert "- Cortes: 0 arquivo(s) em cortes/" in result.stdout
+
+
+def test_status_shows_present_artifacts(tmp_path, monkeypatch):
+    project_dir = _create_project(tmp_path, monkeypatch)
+    (project_dir / "original" / "video-original.mp4").write_bytes(b"fake")
+    (project_dir / "audio" / "audio.wav").write_bytes(b"fake")
+    (project_dir / "cortes" / "001_cap01_titulo.mp4").write_bytes(b"fake")
+
+    result = runner.invoke(app, ["status", str(project_dir)])
+
+    assert result.exit_code == 0
+    assert "- Vídeo original: presente" in result.stdout
+    assert "- Áudio: presente" in result.stdout
+    assert "- Cortes: 1 arquivo(s) em cortes/" in result.stdout
+
+
+def test_status_reports_project_not_found(tmp_path, monkeypatch):
+    monkeypatch.setenv("VIDEO_EDITORIAL_PROJETOS_DIR", str(tmp_path / "projetos"))
+
+    result = runner.invoke(app, ["status", "nao-existe"])
+
+    assert result.exit_code == 1

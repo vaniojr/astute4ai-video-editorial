@@ -4,7 +4,7 @@ from pathlib import Path
 from app import cutter as cutter_module
 from app.analysis import AnalysisRow, ChapterReport, DryRunReport
 from app.config import Settings
-from app.cutter import generate_cuts
+from app.cutter import CutterError, generate_cuts
 
 
 def _settings(tmp_path):
@@ -211,3 +211,20 @@ def test_generate_cuts_skips_ineligible_chapters(tmp_path, monkeypatch):
 
     assert result.outcomes[0].status == "skipped_ineligible"
     assert result.cut_count == 0
+
+
+def test_generate_cuts_raises_when_ffmpeg_missing(tmp_path, monkeypatch):
+    settings = _settings(tmp_path)
+    project_dir, report = _make_report(tmp_path, [_ok_chapter()])
+    monkeypatch.setattr(cutter_module.shutil, "which", lambda name: None)
+
+    def _fail_if_called(cmd, capture_output=True, text=True):
+        raise AssertionError("ffmpeg não deveria ser chamado")
+
+    monkeypatch.setattr(cutter_module.subprocess, "run", _fail_if_called)
+
+    try:
+        generate_cuts(report, project_dir, settings)
+        assert False, "deveria ter levantado CutterError"
+    except CutterError as exc:
+        assert "FFmpeg" in str(exc)
