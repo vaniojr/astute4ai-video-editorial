@@ -2,11 +2,20 @@
 
 import typer
 
+from app.analysis import AnalysisError, DryRunReport, build_dry_run_report
 from app.audio import AudioError, extract_audio
 from app.config import load_settings
 from app.downloader import DownloadError, download_video
 from app.metadata import MetadataError
-from app.project import ProjectNotFoundError, create_project, load_project, resolve_project_dir, update_status
+from app.project import (
+    ProjectNotFoundError,
+    advance_status,
+    create_project,
+    load_project,
+    resolve_project_dir,
+    update_status,
+)
+from app.timestamps import format_hms
 from app.transcriber import TranscriptionError, transcribe_project
 
 app = typer.Typer(help="Ferramenta local para produção editorial de vídeos.")
@@ -129,6 +138,84 @@ def transcribe(
     update_status(project_dir, "transcribed")
     typer.echo("Transcrição concluída:\n")
     typer.echo(str(result.md_path))
+
+
+@app.command()
+def cut(
+    project: str = typer.Argument(..., help="Nome do diretório em projetos/ ou caminho do projeto."),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Valida 03 Analise.csv e mostra os cortes elegíveis, sem gerar vídeos."
+    ),
+) -> None:
+    """Gera os cortes definidos em 03 Analise.csv."""
+    settings = load_settings()
+    try:
+        project_dir = resolve_project_dir(project, settings)
+    except ProjectNotFoundError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1)
+
+    if not dry_run:
+        typer.echo(
+            "A geração real dos cortes ainda não está implementada nesta versão.\n\n"
+            "Use 'video-editorial cut PROJECT --dry-run' para validar 03 Analise.csv "
+            "e ver os cortes elegíveis.",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+    try:
+        report = build_dry_run_report(project_dir)
+    except AnalysisError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1)
+
+    _print_dry_run_report(report)
+    advance_status(project_dir, "analyzed")
+
+
+def _print_dry_run_report(report: DryRunReport) -> None:
+    typer.echo("Projeto:")
+    typer.echo(report.project_dir.name)
+    typer.echo("")
+    typer.echo("Vídeo:")
+    typer.echo(str(report.video_path.relative_to(report.project_dir)))
+    typer.echo("")
+    typer.echo("Duração:")
+    typer.echo(format_hms(report.video_duration_seconds))
+    typer.echo("")
+    typer.echo("CSV:")
+    typer.echo(report.csv_path.name)
+    typer.echo("")
+    typer.echo("Cortes elegíveis:")
+    typer.echo(str(report.eligible_count))
+
+    for chapter in report.chapters:
+        if chapter.status == "discarded":
+            continue
+        typer.echo("")
+        if chapter.status == "ok":
+            suffix = " (timestamp ajustado)" if chapter.message else ""
+            typer.echo(f"[OK] Capítulo {chapter.row.capitulo}{suffix}")
+            typer.echo(f"{format_hms(chapter.start_seconds)} → {format_hms(chapter.end_seconds)}")
+            typer.echo(f"Duração: {format_hms(chapter.end_seconds - chapter.start_seconds)}")
+            if chapter.message:
+                typer.echo(f"Nota: {chapter.message}")
+        elif chapter.status == "ambiguous":
+            typer.echo(f"[AMBÍGUO] Capítulo {chapter.row.capitulo}")
+            typer.echo(chapter.message)
+        elif chapter.status == "manual_action":
+            typer.echo(f"[AVISO] Capítulo {chapter.row.capitulo}")
+            typer.echo(chapter.message)
+        elif chapter.status == "error":
+            typer.echo(f"[ERRO] Capítulo {chapter.row.capitulo}")
+            typer.echo(chapter.message)
+
+    if report.warnings:
+        typer.echo("")
+        typer.echo("Avisos:")
+        for warning in report.warnings:
+            typer.echo(f"- {warning}")
 
 
 if __name__ == "__main__":

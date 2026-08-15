@@ -4,6 +4,7 @@ from datetime import date
 from typer.testing import CliRunner
 
 from app import project as project_module
+from app.analysis import AnalysisError, AnalysisRow, ChapterReport, DryRunReport
 from app.audio import AudioError, AudioResult
 from app.downloader import DownloadError, DownloadResult
 from app.metadata import MetadataError, VideoMetadata
@@ -245,5 +246,58 @@ def test_transcribe_reports_project_not_found(tmp_path, monkeypatch):
     monkeypatch.setenv("VIDEO_EDITORIAL_PROJETOS_DIR", str(tmp_path / "projetos"))
 
     result = runner.invoke(app, ["transcribe", "nao-existe"])
+
+    assert result.exit_code == 1
+
+
+def test_cut_dry_run_prints_report_and_advances_status(tmp_path, monkeypatch):
+    project_dir = _create_project(tmp_path, monkeypatch)
+
+    row = AnalysisRow(ordem_publicacao="1", capitulo="08", acao_editorial="Manter")
+    chapter = ChapterReport(row=row, status="ok", start_seconds=1747.0, end_seconds=2242.0)
+    report = DryRunReport(
+        project_dir=project_dir,
+        video_path=project_dir / "original" / "video-original.mp4",
+        video_duration_seconds=6303.0,
+        csv_path=project_dir / "03 Analise.csv",
+        chapters=[chapter],
+        warnings=[],
+    )
+    monkeypatch.setattr(cli_main, "build_dry_run_report", lambda pdir: report)
+
+    result = runner.invoke(app, ["cut", str(project_dir), "--dry-run"])
+
+    assert result.exit_code == 0
+    assert "Cortes elegíveis:" in result.stdout
+    assert "[OK] Capítulo 08" in result.stdout
+    data = json.loads((project_dir / "project.json").read_text(encoding="utf-8"))
+    assert data["status"] == "analyzed"
+
+
+def test_cut_without_dry_run_reports_not_implemented(tmp_path, monkeypatch):
+    project_dir = _create_project(tmp_path, monkeypatch)
+
+    result = runner.invoke(app, ["cut", str(project_dir)])
+
+    assert result.exit_code == 1
+
+
+def test_cut_dry_run_reports_analysis_errors(tmp_path, monkeypatch):
+    project_dir = _create_project(tmp_path, monkeypatch)
+
+    def _raise(pdir):
+        raise AnalysisError("mensagem acionável")
+
+    monkeypatch.setattr(cli_main, "build_dry_run_report", _raise)
+
+    result = runner.invoke(app, ["cut", str(project_dir), "--dry-run"])
+
+    assert result.exit_code == 1
+
+
+def test_cut_reports_project_not_found(tmp_path, monkeypatch):
+    monkeypatch.setenv("VIDEO_EDITORIAL_PROJETOS_DIR", str(tmp_path / "projetos"))
+
+    result = runner.invoke(app, ["cut", "nao-existe", "--dry-run"])
 
     assert result.exit_code == 1

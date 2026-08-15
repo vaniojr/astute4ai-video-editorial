@@ -13,6 +13,19 @@ from app.slug import slugify
 
 _PROJECT_SUBDIRS = ("original", "audio", "cortes", "thumbs", "publicados", "logs")
 
+# PRD seção 23 — ordem dos estágios do pipeline, usada por advance_status()
+# para nunca regredir um status já mais avançado.
+_STATUS_ORDER = (
+    "created",
+    "downloaded",
+    "audio_ready",
+    "transcribed",
+    "analyzed",
+    "validated",
+    "cut",
+    "published",
+)
+
 # templates/ fica ao lado de app/ na raiz do repositório (execução a partir do
 # código-fonte via `uv run`, sem empacotamento de dados de template).
 _TEMPLATE_PATH = Path(__file__).resolve().parent.parent / "templates" / "fonte.md"
@@ -83,6 +96,22 @@ def load_project(project_dir: Path) -> Project:
 def update_status(project_dir: Path, status: str) -> None:
     path = project_dir / "project.json"
     data = json.loads(path.read_text(encoding="utf-8"))
+    data["status"] = status
+    path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def advance_status(project_dir: Path, status: str) -> None:
+    """Como update_status(), mas nunca regride um status já mais avançado."""
+    path = project_dir / "project.json"
+    data = json.loads(path.read_text(encoding="utf-8"))
+
+    current = data["status"]
+    current_index = _STATUS_ORDER.index(current) if current in _STATUS_ORDER else -1
+    new_index = _STATUS_ORDER.index(status) if status in _STATUS_ORDER else -1
+
+    if new_index <= current_index:
+        return
+
     data["status"] = status
     path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
