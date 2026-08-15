@@ -1,6 +1,6 @@
 [project]
 name = "video-editorial"
-version = "0.6.0"
+version = "0.7.0"
 description = "Ferramenta local para apoiar a produção editorial de vídeos longos, podcasts e lives."
 readme = "README.md"
 requires-python = ">=3.11"

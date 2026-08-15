@@ -1,9 +1,12 @@
-"""Orquestração do comando `editorialize` — Entrega 8.1 (planejamento, sem renderização).
+"""Orquestração dos comandos `editorialize`/`render`.
 
-`plan_editorial()` nunca chama o provider nem exige `ANTHROPIC_API_KEY` — é
-usado por `--dry-run` e não tem custo algum, mesmo padrão de
-`app/analyzer.py::plan_analysis()`. Só `generate_editorial()` (chamada real)
-constrói o provider de fato.
+`plan_editorial()`/`plan_render()` nunca chamam o provider de IA nem o
+FFmpeg — usados por `--dry-run`, sem custo e sem exigir `ANTHROPIC_API_KEY`
+nem `transcricao.json` além do estritamente necessário para cada um (mesmo
+padrão de `app/analyzer.py::plan_analysis()`). A resolução de
+capítulo/corte/marca é compartilhada entre planejamento e renderização
+(`_resolve_chapter_cut_context`) — renderizar não deveria exigir a
+transcrição, que só o planejamento (via IA) precisa.
 """
 
 import json
@@ -15,9 +18,10 @@ from app.analysis import ChapterReport, build_dry_run_report, select_single_chap
 from app.brands import Brand, load_brand
 from app.config import Settings
 from app.cutter import CutterError, build_cut_filename
-from app.editorial_models import EditorialPlan
+from app.editorial_models import ContextCard, Cta, EditorialPlan, Highlight, Intro, SourceAttribution
 from app.editorial_planner import build_editorial_plan, extract_transcript_excerpt, format_transcript_excerpt
 from app.editorial_provider import EditorialRequest, get_editorial_provider
+from app.editorial_renderer import RenderResult, render_editorial_video
 from app.logging_utils import log_operation
 from app.project import Project, load_project
 from app.transcriber import TranscriptSegment
@@ -29,6 +33,49 @@ _PLAN_GLOB = "editorial_plan_v*.json"
 
 class EditorialServiceError(Exception):
     """Erro acionável na orquestração de editorialização (não específico de provider)."""
+
+
+@dataclass(frozen=True)
+class _ChapterCutContext:
+    project: Project
+    brand: Brand
+    chapter_report: ChapterReport
+    cut_path: Path
+    editorial_dir: Path
+
+
+def _resolve_chapter_cut_context(project_dir: Path, settings: Settings, *, chapter: int) -> _ChapterCutContext:
+    project = load_project(project_dir)
+    brand = load_brand(project.brand, settings.brands_dir)
+
+    report = build_dry_run_report(project_dir)
+    chapter_report = select_single_chapter(report.chapters, chapter=chapter)
+    if chapter_report.status != "ok":
+        raise EditorialServiceError(
+            f"Capítulo {chapter} não está elegível para corte "
+            f"(status={chapter_report.status}): {chapter_report.message or ''}"
+        )
+
+    try:
+        cut_filename = build_cut_filename(chapter_report.row, settings)
+    except CutterError as exc:
+        raise EditorialServiceError(str(exc)) from exc
+
+    cut_path = project_dir / "cortes" / cut_filename
+    if not cut_path.is_file():
+        raise EditorialServiceError(
+            f"Corte não encontrado: {cut_path}\n\n"
+            f"Rode 'video-editorial cut {project_dir.name} --chapter {chapter}' primeiro."
+        )
+
+    editorial_dir = project_dir / "editorial" / Path(cut_filename).stem
+
+    return _ChapterCutContext(
+        project=project, brand=brand, chapter_report=chapter_report, cut_path=cut_path, editorial_dir=editorial_dir
+    )
+
+
+# --- Planejamento (editorialize) -------------------------------------------------
 
 
 @dataclass(frozen=True)
@@ -61,28 +108,7 @@ def plan_editorial(
     resolved_provider = provider or settings.editorial_provider
     resolved_model = model or settings.editorial_model
 
-    project = load_project(project_dir)
-    brand = load_brand(project.brand, settings.brands_dir)
-
-    report = build_dry_run_report(project_dir)
-    chapter_report = select_single_chapter(report.chapters, chapter=chapter)
-    if chapter_report.status != "ok":
-        raise EditorialServiceError(
-            f"Capítulo {chapter} não está elegível para corte "
-            f"(status={chapter_report.status}): {chapter_report.message or ''}"
-        )
-
-    try:
-        cut_filename = build_cut_filename(chapter_report.row, settings)
-    except CutterError as exc:
-        raise EditorialServiceError(str(exc)) from exc
-
-    cut_path = project_dir / "cortes" / cut_filename
-    if not cut_path.is_file():
-        raise EditorialServiceError(
-            f"Corte não encontrado: {cut_path}\n\n"
-            f"Rode 'video-editorial cut {project_dir.name} --chapter {chapter}' primeiro."
-        )
+    context = _resolve_chapter_cut_context(project_dir, settings, chapter=chapter)
 
     transcricao_json_path = project_dir / "transcricao.json"
     if not transcricao_json_path.is_file():
@@ -91,29 +117,27 @@ def plan_editorial(
             "Execute 'video-editorial transcribe PROJECT' primeiro."
         )
 
-    cut_duration_seconds = chapter_report.end_seconds - chapter_report.start_seconds
+    cut_duration_seconds = context.chapter_report.end_seconds - context.chapter_report.start_seconds
     transcript_segments = extract_transcript_excerpt(
-        transcricao_json_path, chapter_report.start_seconds, chapter_report.end_seconds
+        transcricao_json_path, context.chapter_report.start_seconds, context.chapter_report.end_seconds
     )
     transcript_excerpt = format_transcript_excerpt(transcript_segments)
-
-    editorial_dir = project_dir / "editorial" / Path(cut_filename).stem
 
     return EditorialGenerationPlan(
         project_dir=project_dir,
         provider=resolved_provider,
         model=resolved_model,
-        project=project,
-        brand=brand,
-        chapter_report=chapter_report,
-        cut_path=cut_path,
-        editorial_dir=editorial_dir,
+        project=context.project,
+        brand=context.brand,
+        chapter_report=context.chapter_report,
+        cut_path=context.cut_path,
+        editorial_dir=context.editorial_dir,
         cut_duration_seconds=cut_duration_seconds,
         transcript_segments=transcript_segments,
         transcript_excerpt=transcript_excerpt,
         transcript_char_count=len(transcript_excerpt),
-        already_exists=(editorial_dir / "metadata.json").is_file(),
-        existing_plan_versions=next_version_number(editorial_dir, _PLAN_GLOB) - 1,
+        already_exists=(context.editorial_dir / "metadata.json").is_file(),
+        existing_plan_versions=next_version_number(context.editorial_dir, _PLAN_GLOB) - 1,
     )
 
 
@@ -206,6 +230,129 @@ def generate_editorial(
 
     return EditorialGenerationResult(
         plan=plan, skipped=False, editorial_plan=editorial_plan, plan_path=plan_path, metadata_path=metadata_path
+    )
+
+
+# --- Renderização (render) --------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class EditorialRenderPlan:
+    project_dir: Path
+    project: Project
+    brand: Brand
+    chapter_report: ChapterReport
+    cut_path: Path
+    editorial_dir: Path
+    plan_version: int
+    plan_path: Path
+    editorial_plan: EditorialPlan
+    output_path: Path
+    already_exists: bool
+
+
+def plan_render(
+    project_dir: Path, settings: Settings, *, chapter: int, version: Optional[int] = None
+) -> EditorialRenderPlan:
+    """Monta o plano de renderização sem chamar o FFmpeg (usado por --dry-run).
+
+    Não exige `transcricao.json` — renderizar só depende do plano
+    editorial já gerado e do corte, nunca da transcrição em si.
+    """
+    context = _resolve_chapter_cut_context(project_dir, settings, chapter=chapter)
+
+    existing_plan_versions = next_version_number(context.editorial_dir, _PLAN_GLOB) - 1
+    resolved_version = version or existing_plan_versions
+    if resolved_version <= 0:
+        raise EditorialServiceError(
+            f"Nenhum plano editorial encontrado para o capítulo {chapter}.\n\n"
+            f"Rode 'video-editorial editorialize {project_dir.name} --chapter {chapter}' primeiro."
+        )
+
+    plan_path = context.editorial_dir / f"editorial_plan_{format_version(resolved_version)}.json"
+    if not plan_path.is_file():
+        raise EditorialServiceError(f"Versão {resolved_version} do plano não encontrada: {plan_path}")
+
+    editorial_plan = _plan_from_dict(json.loads(plan_path.read_text(encoding="utf-8")))
+
+    final_dir = project_dir / "final"
+    slug = context.cut_path.stem
+    final_glob = f"{slug}_v*.mp4"
+    output_version = next_version_number(final_dir, final_glob)
+    output_path = final_dir / f"{slug}_{format_version(output_version)}.mp4"
+
+    return EditorialRenderPlan(
+        project_dir=project_dir,
+        project=context.project,
+        brand=context.brand,
+        chapter_report=context.chapter_report,
+        cut_path=context.cut_path,
+        editorial_dir=context.editorial_dir,
+        plan_version=resolved_version,
+        plan_path=plan_path,
+        editorial_plan=editorial_plan,
+        output_path=output_path,
+        already_exists=output_version > 1,
+    )
+
+
+@dataclass(frozen=True)
+class EditorialRenderGenerationResult:
+    plan: EditorialRenderPlan
+    skipped: bool
+    render_result: Optional[RenderResult] = None
+
+
+def render_editorial(
+    project_dir: Path,
+    settings: Settings,
+    *,
+    chapter: int,
+    version: Optional[int] = None,
+    force: bool = False,
+) -> EditorialRenderGenerationResult:
+    plan = plan_render(project_dir, settings, chapter=chapter, version=version)
+
+    if plan.already_exists and not force:
+        return EditorialRenderGenerationResult(plan=plan, skipped=True)
+
+    comando = f"render {project_dir.name} --chapter={chapter} --version={plan.plan_version} --force={force}"
+
+    with log_operation(project_dir, etapa="render", comando=comando) as log_extra:
+        render_result = render_editorial_video(
+            plan.editorial_plan, plan.cut_path, plan.brand, plan.output_path, settings
+        )
+
+        metadata_path = plan.editorial_dir / "metadata.json"
+        metadata = json.loads(metadata_path.read_text(encoding="utf-8")) if metadata_path.is_file() else {}
+        metadata["final_file"] = render_result.output_path.name
+        metadata["status"] = "rendered"
+        metadata_path.write_text(
+            json.dumps(metadata, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+        )
+
+        log_extra["intro_included"] = render_result.intro_included
+        log_extra["cta_included"] = render_result.cta_included
+        if render_result.skipped_text_reason:
+            log_extra["skipped_text_reason"] = render_result.skipped_text_reason
+
+    return EditorialRenderGenerationResult(plan=plan, skipped=False, render_result=render_result)
+
+
+def _plan_from_dict(data: dict) -> EditorialPlan:
+    return EditorialPlan(
+        chapter=data["chapter"],
+        cut_file=data["cut_file"],
+        brand=data["brand"],
+        version=data["version"],
+        intro=Intro(**data["intro"]),
+        source_attribution=SourceAttribution(**data["source_attribution"]),
+        lower_thirds=list(data.get("lower_thirds", [])),
+        context_cards=[ContextCard(**c) for c in data.get("context_cards", [])],
+        highlights=[Highlight(**h) for h in data.get("highlights", [])],
+        cta=Cta(**data["cta"]),
+        provider=data.get("provider", ""),
+        model=data.get("model", ""),
     )
 
 

@@ -30,6 +30,8 @@ class Settings:
     editorial_provider: str
     editorial_model: str
     editorial_temperature: float
+    editorial_intro_seconds: float
+    editorial_cta_seconds: float
 
 
 def load_settings() -> Settings:
@@ -52,4 +54,6 @@ def load_settings() -> Settings:
         editorial_provider=os.environ.get("VIDEO_EDITORIAL_EDITORIAL_PROVIDER", "claude"),
         editorial_model=os.environ.get("VIDEO_EDITORIAL_EDITORIAL_MODEL", "claude-sonnet-5"),
         editorial_temperature=float(os.environ.get("VIDEO_EDITORIAL_EDITORIAL_TEMPERATURE", "0")),
+        editorial_intro_seconds=float(os.environ.get("VIDEO_EDITORIAL_EDITORIAL_INTRO_SECONDS", "10")),
+        editorial_cta_seconds=float(os.environ.get("VIDEO_EDITORIAL_EDITORIAL_CTA_SECONDS", "5")),
     )

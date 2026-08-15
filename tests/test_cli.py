@@ -591,7 +591,7 @@ def test_editorialize_yes_skips_confirmation_and_prints_summary(tmp_path, monkey
     assert result.exit_code == 0
     assert "Chamando a API da Claude" in result.stdout
     assert "Plano editorial gerado" in result.stdout
-    assert "Renderização ainda não implementada" in result.stdout
+    assert "video-editorial render" in result.stdout
 
 
 def test_editorialize_reports_service_errors(tmp_path, monkeypatch):
@@ -641,6 +641,169 @@ def test_editorialize_reports_project_not_found(tmp_path, monkeypatch):
     monkeypatch.setenv("VIDEO_EDITORIAL_PROJETOS_DIR", str(tmp_path / "projetos"))
 
     result = runner.invoke(app, ["editorialize", "nao-existe", "--chapter", "8", "--dry-run"])
+
+    assert result.exit_code == 1
+
+
+def _fake_render_editorial_plan(project_dir, **overrides):
+    from app.editorial_models import Cta, EditorialPlan, Intro, SourceAttribution
+    from app.editorial_service import EditorialRenderPlan
+
+    row = AnalysisRow(
+        ordem_publicacao="8",
+        capitulo="8",
+        acao_editorial="Manter",
+        tema_principal="Governabilidade",
+        titulo_sugerido="Não vou ser usado pelo Centrão",
+    )
+    chapter_report = ChapterReport(row=row, status="ok", start_seconds=1747.0, end_seconds=2242.0)
+    editorial_plan = EditorialPlan(
+        chapter="8",
+        cut_file="008_cap08_nao-vou-ser-usado-pelo-centrao.mp4",
+        brand="generic",
+        version=1,
+        intro=Intro(mode="text_only", text="Intro de teste"),
+        source_attribution=SourceAttribution(text="Fonte original: Teste"),
+        lower_thirds=[],
+        context_cards=[],
+        highlights=[],
+        cta=Cta(enabled=True, text="CTA de teste"),
+        provider="claude",
+        model="claude-sonnet-5",
+    )
+    editorial_dir = project_dir / "editorial" / "008_cap08_nao-vou-ser-usado-pelo-centrao"
+    defaults = dict(
+        project_dir=project_dir,
+        project=project_module.load_project(project_dir),
+        brand=_fake_brand(),
+        chapter_report=chapter_report,
+        cut_path=project_dir / "cortes" / "008_cap08_nao-vou-ser-usado-pelo-centrao.mp4",
+        editorial_dir=editorial_dir,
+        plan_version=1,
+        plan_path=editorial_dir / "editorial_plan_v001.json",
+        editorial_plan=editorial_plan,
+        output_path=project_dir / "final" / "008_cap08_nao-vou-ser-usado-pelo-centrao_v001.mp4",
+        already_exists=False,
+    )
+    defaults.update(overrides)
+    return EditorialRenderPlan(**defaults)
+
+
+def _fake_render_generation_result(plan, **result_overrides):
+    from app.editorial_renderer import RenderResult
+    from app.editorial_service import EditorialRenderGenerationResult
+
+    render_defaults = dict(output_path=plan.output_path, intro_included=True, cta_included=True, skipped_text_reason=None)
+    render_defaults.update(result_overrides)
+    plan.output_path.parent.mkdir(parents=True, exist_ok=True)
+    plan.output_path.write_bytes(b"fake final video")
+    return EditorialRenderGenerationResult(plan=plan, skipped=False, render_result=RenderResult(**render_defaults))
+
+
+def test_render_dry_run_prints_plan_without_calling_ffmpeg(tmp_path, monkeypatch):
+    project_dir = _create_project(tmp_path, monkeypatch)
+    plan = _fake_render_editorial_plan(project_dir)
+    monkeypatch.setattr(cli_main, "plan_render", lambda pdir, settings, chapter, version=None: plan)
+
+    def _fail_if_called(*args, **kwargs):
+        raise AssertionError("render_editorial não deveria ser chamado em --dry-run")
+
+    monkeypatch.setattr(cli_main, "render_editorial", _fail_if_called)
+
+    result = runner.invoke(app, ["render", str(project_dir), "--chapter", "8", "--dry-run"])
+
+    assert result.exit_code == 0
+    assert "DRY RUN" in result.stdout
+    assert "Nenhum vídeo será gerado." in result.stdout
+    assert "v001" in result.stdout
+
+
+def test_render_generates_final_video_and_prints_summary(tmp_path, monkeypatch):
+    project_dir = _create_project(tmp_path, monkeypatch)
+    plan = _fake_render_editorial_plan(project_dir)
+    monkeypatch.setattr(cli_main, "plan_render", lambda pdir, settings, chapter, version=None: plan)
+    fake_result = _fake_render_generation_result(plan)
+    monkeypatch.setattr(
+        cli_main, "render_editorial", lambda pdir, settings, chapter, version=None, force=False: fake_result
+    )
+
+    result = runner.invoke(app, ["render", str(project_dir), "--chapter", "8"])
+
+    assert result.exit_code == 0
+    assert "Vídeo final gerado" in result.stdout
+    assert "Intro incluída: sim" in result.stdout
+    assert "CTA incluído: sim" in result.stdout
+
+
+def test_render_prints_skipped_text_reason(tmp_path, monkeypatch):
+    project_dir = _create_project(tmp_path, monkeypatch)
+    plan = _fake_render_editorial_plan(project_dir)
+    monkeypatch.setattr(cli_main, "plan_render", lambda pdir, settings, chapter, version=None: plan)
+    fake_result = _fake_render_generation_result(
+        plan, intro_included=False, cta_included=False, skipped_text_reason="Marca sem fonte configurada."
+    )
+    monkeypatch.setattr(
+        cli_main, "render_editorial", lambda pdir, settings, chapter, version=None, force=False: fake_result
+    )
+
+    result = runner.invoke(app, ["render", str(project_dir), "--chapter", "8"])
+
+    assert result.exit_code == 0
+    assert "Intro incluída: não" in result.stdout
+    assert "Marca sem fonte configurada." in result.stdout
+
+
+def test_render_skips_when_already_exists_without_force(tmp_path, monkeypatch):
+    project_dir = _create_project(tmp_path, monkeypatch)
+    plan = _fake_render_editorial_plan(project_dir, already_exists=True)
+    monkeypatch.setattr(cli_main, "plan_render", lambda pdir, settings, chapter, version=None: plan)
+
+    def _fail_if_called(*args, **kwargs):
+        raise AssertionError("render_editorial não deveria ser chamado")
+
+    monkeypatch.setattr(cli_main, "render_editorial", _fail_if_called)
+
+    result = runner.invoke(app, ["render", str(project_dir), "--chapter", "8"])
+
+    assert result.exit_code == 0
+    assert "Já existe um vídeo final" in result.stdout
+    assert "--force" in result.stdout
+
+
+def test_render_reports_plan_errors(tmp_path, monkeypatch):
+    project_dir = _create_project(tmp_path, monkeypatch)
+
+    def _raise(pdir, settings, chapter, version=None):
+        raise EditorialServiceError("nenhum plano editorial encontrado")
+
+    monkeypatch.setattr(cli_main, "plan_render", _raise)
+
+    result = runner.invoke(app, ["render", str(project_dir), "--chapter", "8", "--dry-run"])
+
+    assert result.exit_code == 1
+
+
+def test_render_reports_renderer_errors(tmp_path, monkeypatch):
+    from app.editorial_renderer import EditorialRenderError
+
+    project_dir = _create_project(tmp_path, monkeypatch)
+    plan = _fake_render_editorial_plan(project_dir)
+    monkeypatch.setattr(cli_main, "plan_render", lambda pdir, settings, chapter, version=None: plan)
+
+    def _raise(pdir, settings, chapter, version=None, force=False):
+        raise EditorialRenderError("FFmpeg falhou")
+
+    monkeypatch.setattr(cli_main, "render_editorial", _raise)
+
+    result = runner.invoke(app, ["render", str(project_dir), "--chapter", "8"])
+
+    assert result.exit_code == 1
+
+
+def test_render_reports_project_not_found(tmp_path, monkeypatch):
+    monkeypatch.setenv("VIDEO_EDITORIAL_PROJETOS_DIR", str(tmp_path / "projetos"))
+
+    result = runner.invoke(app, ["render", "nao-existe", "--chapter", "8", "--dry-run"])
 
     assert result.exit_code == 1
 

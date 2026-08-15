@@ -4,6 +4,18 @@ Resumo em destaques do que cada versão trouxe, pensado para leitura rápida —
 "o que dá pra fazer agora que não dava antes". Para detalhe técnico
 (arquivos, commits, decisões), veja [CHANGELOG.md](CHANGELOG.md).
 
+## v0.7.0 — 2026-08-15
+
+- **Renderização do vídeo final**: novo comando `render` transforma um
+  plano editorial já aprovado em `final/*.mp4` — concatena intro (texto),
+  corte e CTA via FFmpeg. Precisa de uma fonte configurada na marca para
+  desenhar texto na tela; sem ela, ainda gera o vídeo final (só sem os
+  cards de texto). Requer um FFmpeg com suporte a `drawtext`
+  (`libfreetype`) — o padrão do `brew install ffmpeg` pode não ter.
+- Cards de contexto, subtemas e identificação de participante na tela
+  ainda não são renderizados (o plano já os prevê; ficam para a próxima
+  versão).
+
 ## v0.6.0 — 2026-08-15
 
 - **Planejamento editorial automático**: novo comando `editorialize` gera,

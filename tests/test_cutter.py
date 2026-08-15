@@ -27,6 +27,8 @@ def _settings(tmp_path):
         editorial_provider="claude",
         editorial_model="claude-sonnet-5",
         editorial_temperature=0.0,
+        editorial_intro_seconds=10.0,
+        editorial_cta_seconds=5.0,
     )
 
 

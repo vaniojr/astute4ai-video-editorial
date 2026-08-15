@@ -8,6 +8,46 @@ correspondente (`git show <hash>`) ou o `docs/PRD_Video_Editorial*.md` da
 época. Para um resumo por versão (menos técnico), veja
 [RELEASE_NOTES.md](RELEASE_NOTES.md).
 
+## 2026-08-15 — Entrega 8.2: Editorial — Renderer mínimo (intro + corte + CTA)
+
+- Novo comando `video-editorial render PROJECT --chapter N [--version N]`:
+  gera `final/<mesmo-nome-base-do-corte>_vNNN.mp4` a partir do plano
+  editorial mais recente (ou de uma versão específica) — concatena
+  **intro (texto) → corte → CTA (texto)** via FFmpeg. Cards de
+  contexto/subtema, lower thirds e atribuição de fonte na tela (todos
+  overlays sobre o corte, categoria de complexidade diferente de
+  concatenar segmentos) ficam para uma entrega futura, conforme a
+  própria recomendação do documento de referência.
+- Composição via filtro `concat` do FFmpeg (não o demuxer) — robusto a
+  pequenas diferenças de parâmetro de encoding entre a intro/CTA
+  (geradas na hora com `color`+`anullsrc`+`drawtext`) e o corte (já
+  codificado por `cut`), porque opera sobre frames decodificados.
+  `app/ffmpeg_utils.py` ganha `probe_video_properties()` — resolução/FPS/
+  sample rate do corte são sempre lidos dele, nunca fixos, para a intro/
+  CTA saírem com os mesmos parâmetros.
+- **Intro/CTA em texto exigem `brand.assets.primary_font` configurado.**
+  Sem fonte, são pulados (aviso claro no resultado) — o render nunca
+  falha o pipeline inteiro por um recurso opcional em falta; o corte
+  sozinho ainda vira um `final/*.mp4` válido (mesmo princípio do modo
+  `manual` da thumbnail).
+- Texto passado ao `drawtext` via `textfile` (arquivo temporário), não
+  `text=` inline — evita todo o escaping de caracteres especiais.
+- Versionamento (`final/..._v001.mp4`, `_v002.mp4`...) reaproveita
+  `app/versioning.py`; idempotente por padrão, `--force` cria versão
+  nova sem sobrescrever.
+- `app/editorial_service.py`: resolução de capítulo/corte/marca
+  extraída para um helper compartilhado entre planejamento e
+  renderização — renderizar não exige `transcricao.json` (só o
+  planejamento via IA precisa da transcrição).
+- Validado manualmente com FFmpeg real: geração de vídeo sintético via
+  `lavfi`, `cut` real, `render` real. O caminho sem fonte (cópia direta
+  do corte) foi validado de ponta a ponta; o caminho com `drawtext` foi
+  validado por inspeção direta do comando FFmpeg gerado (correto), mas
+  **não pôde ser executado nesta máquina** — o `ffmpeg` instalado via
+  `brew install ffmpeg` aqui não tem o filtro `drawtext` compilado
+  (falta suporte a `libfreetype`). Documentado no README como um
+  requisito operacional.
+
 ## 2026-08-15 — Entrega 8.1: Editorial — Planner (sem renderização)
 
 - Novo comando `video-editorial editorialize PROJECT --chapter N`: gera

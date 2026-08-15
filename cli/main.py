@@ -24,7 +24,14 @@ from app.config import load_settings
 from app.cutter import CutRunResult, CutterError, generate_cuts
 from app.downloader import DownloadError, download_video
 from app.editorial_provider import EditorialProviderError
-from app.editorial_service import EditorialServiceError, generate_editorial, plan_editorial
+from app.editorial_renderer import EditorialRenderError
+from app.editorial_service import (
+    EditorialServiceError,
+    generate_editorial,
+    plan_editorial,
+    plan_render,
+    render_editorial,
+)
 from app.logging_utils import log_event, log_operation
 from app.metadata import MetadataError
 from app.project import (
@@ -466,7 +473,70 @@ def editorialize(
     typer.echo(f"Destaques: {len(editorial_plan.highlights)}")
     typer.echo(f"CTA: {'sim' if editorial_plan.cta.enabled else 'não'}")
     typer.echo("")
-    typer.echo("Renderização ainda não implementada — revise o plano antes da próxima entrega.")
+    typer.echo(
+        f"Revise o plano e rode 'video-editorial render {project_dir.name} --chapter {chapter}' "
+        "para gerar o vídeo final."
+    )
+
+
+@app.command()
+def render(
+    project: str = typer.Argument(..., help="Nome do diretório em projetos/ ou caminho do projeto."),
+    chapter: int = typer.Option(..., "--chapter", help="Número do capítulo (Capitulo no CSV)."),
+    version: Optional[int] = typer.Option(
+        None, "--version", help="Versão do plano editorial a renderizar (padrão: mais recente)."
+    ),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Mostra o que seria renderizado (intro/CTA/versão) sem chamar o FFmpeg."
+    ),
+    force: bool = typer.Option(
+        False, "--force", help="Renderizar de novo mesmo se já existir um final/*.mp4 para este capítulo."
+    ),
+) -> None:
+    """Renderiza o vídeo final (intro + corte + CTA) a partir de um plano editorial já gerado."""
+    settings = load_settings()
+    try:
+        project_dir = resolve_project_dir(project, settings)
+    except ProjectNotFoundError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1)
+
+    try:
+        plan = plan_render(project_dir, settings, chapter=chapter, version=version)
+    except (EditorialServiceError, AnalysisError) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1)
+
+    if dry_run:
+        _print_render_plan(plan)
+        return
+
+    if plan.already_exists and not force:
+        typer.echo(f"Já existe um vídeo final para o capítulo {chapter}.")
+        typer.echo("Use --force para renderizar de novo (gera uma nova versão).")
+        return
+
+    typer.echo(f"Renderizando a partir do plano v{plan.plan_version:03d}...")
+    try:
+        result = render_editorial(project_dir, settings, chapter=chapter, version=version, force=force)
+    except (EditorialServiceError, EditorialRenderError, AnalysisError) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1)
+
+    if result.skipped:
+        typer.echo(f"Já existe um vídeo final para o capítulo {chapter}.")
+        typer.echo("Use --force para renderizar de novo (gera uma nova versão).")
+        return
+
+    render_result = result.render_result
+    typer.echo("Vídeo final gerado:\n")
+    typer.echo(str(render_result.output_path))
+    typer.echo("")
+    typer.echo(f"Intro incluída: {'sim' if render_result.intro_included else 'não'}")
+    typer.echo(f"CTA incluído: {'sim' if render_result.cta_included else 'não'}")
+    if render_result.skipped_text_reason:
+        typer.echo("")
+        typer.echo(render_result.skipped_text_reason)
 
 
 @app.command()
@@ -698,6 +768,30 @@ def _print_editorial_plan(plan) -> None:
     typer.echo("")
     typer.echo("DRY RUN")
     typer.echo("Nenhuma chamada de API realizada.")
+
+
+def _print_render_plan(plan) -> None:
+    editorial_plan = plan.editorial_plan
+    typer.echo("Projeto:")
+    typer.echo(plan.project_dir.name)
+    typer.echo("Capítulo:")
+    typer.echo(str(editorial_plan.chapter))
+    typer.echo("Corte:")
+    typer.echo(plan.cut_path.name)
+    typer.echo("Plano:")
+    typer.echo(f"v{plan.plan_version:03d} ({plan.plan_path.name})")
+    typer.echo("Intro:")
+    typer.echo("sim" if editorial_plan.intro.mode == "text_only" else "não")
+    typer.echo("CTA:")
+    typer.echo("sim" if editorial_plan.cta.enabled else "não")
+    typer.echo("Fonte da marca configurada:")
+    font = plan.brand.assets.primary_font
+    typer.echo("sim" if font and font.is_file() else "não (intro/CTA em texto seriam pulados)")
+    typer.echo("Arquivo final previsto:")
+    typer.echo(plan.output_path.name)
+    typer.echo("")
+    typer.echo("DRY RUN")
+    typer.echo("Nenhum vídeo será gerado.")
 
 
 def _confirm_yes_no(prompt: str) -> bool:

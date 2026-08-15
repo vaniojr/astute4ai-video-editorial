@@ -36,6 +36,8 @@ def _settings(tmp_path):
         editorial_provider="claude",
         editorial_model="claude-sonnet-5",
         editorial_temperature=0.0,
+        editorial_intro_seconds=10.0,
+        editorial_cta_seconds=5.0,
     )
 
 
@@ -273,3 +275,198 @@ def test_generate_editorial_sends_only_cut_excerpt_not_full_transcript(tmp_path,
     assert "conteudo bem antes do corte" not in captured[0].transcript_excerpt
     assert "conteudo bem depois do corte" not in captured[0].transcript_excerpt
     assert "primeira parte do corte" in captured[0].transcript_excerpt
+
+
+# --- plan_render / render_editorial -----------------------------------------------
+
+
+def _fake_render_result(output_path, *, intro_included=True, cta_included=True, skipped_text_reason=None):
+    from app.editorial_renderer import RenderResult
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_bytes(b"fake final video")
+    return RenderResult(
+        output_path=output_path,
+        intro_included=intro_included,
+        cta_included=cta_included,
+        skipped_text_reason=skipped_text_reason,
+    )
+
+
+def _patch_renderer(monkeypatch, **result_overrides):
+    def _fake_render(editorial_plan, cut_path, brand, output_path, settings):
+        return _fake_render_result(output_path, **result_overrides)
+
+    monkeypatch.setattr(editorial_service_module, "render_editorial_video", _fake_render)
+
+
+def test_plan_render_raises_when_no_plan_exists(tmp_path, monkeypatch):
+    from app.editorial_service import EditorialServiceError, plan_render
+
+    settings = _settings(tmp_path)
+    _write_generic_brand(settings.brands_dir)
+    project_dir = _make_project(tmp_path)
+    _fake_ffprobe(monkeypatch)
+
+    with pytest.raises(EditorialServiceError):
+        plan_render(project_dir, settings, chapter=8)
+
+
+def test_plan_render_does_not_require_transcript(tmp_path, monkeypatch):
+    from app.editorial_service import plan_render
+
+    settings = _settings(tmp_path)
+    _write_generic_brand(settings.brands_dir)
+    project_dir = _make_project(tmp_path)
+    _fake_ffprobe(monkeypatch)
+    _patch_provider(monkeypatch, _FakeEditorialProvider())
+    generate_editorial(project_dir, settings, chapter=8)
+
+    (project_dir / "transcricao.json").unlink()
+
+    plan = plan_render(project_dir, settings, chapter=8)
+
+    assert plan.plan_version == 1
+
+
+def test_plan_render_resolves_latest_version_by_default(tmp_path, monkeypatch):
+    from app.editorial_service import plan_render
+
+    settings = _settings(tmp_path)
+    _write_generic_brand(settings.brands_dir)
+    project_dir = _make_project(tmp_path)
+    _fake_ffprobe(monkeypatch)
+    _patch_provider(monkeypatch, _FakeEditorialProvider())
+
+    generate_editorial(project_dir, settings, chapter=8)
+    generate_editorial(project_dir, settings, chapter=8, force=True)
+
+    plan = plan_render(project_dir, settings, chapter=8)
+
+    assert plan.plan_version == 2
+    assert plan.plan_path.name == "editorial_plan_v002.json"
+    assert plan.already_exists is False
+
+
+def test_plan_render_accepts_explicit_version(tmp_path, monkeypatch):
+    from app.editorial_service import plan_render
+
+    settings = _settings(tmp_path)
+    _write_generic_brand(settings.brands_dir)
+    project_dir = _make_project(tmp_path)
+    _fake_ffprobe(monkeypatch)
+    _patch_provider(monkeypatch, _FakeEditorialProvider())
+
+    generate_editorial(project_dir, settings, chapter=8)
+    generate_editorial(project_dir, settings, chapter=8, force=True)
+
+    plan = plan_render(project_dir, settings, chapter=8, version=1)
+
+    assert plan.plan_version == 1
+    assert plan.plan_path.name == "editorial_plan_v001.json"
+
+
+def test_plan_render_raises_when_explicit_version_missing(tmp_path, monkeypatch):
+    from app.editorial_service import EditorialServiceError, plan_render
+
+    settings = _settings(tmp_path)
+    _write_generic_brand(settings.brands_dir)
+    project_dir = _make_project(tmp_path)
+    _fake_ffprobe(monkeypatch)
+    _patch_provider(monkeypatch, _FakeEditorialProvider())
+
+    generate_editorial(project_dir, settings, chapter=8)
+
+    with pytest.raises(EditorialServiceError):
+        plan_render(project_dir, settings, chapter=8, version=99)
+
+
+def test_render_editorial_writes_final_file_and_updates_metadata(tmp_path, monkeypatch):
+    from app.editorial_service import render_editorial
+
+    settings = _settings(tmp_path)
+    _write_generic_brand(settings.brands_dir)
+    project_dir = _make_project(tmp_path)
+    _fake_ffprobe(monkeypatch)
+    _patch_provider(monkeypatch, _FakeEditorialProvider())
+    generate_editorial(project_dir, settings, chapter=8)
+    _patch_renderer(monkeypatch)
+
+    result = render_editorial(project_dir, settings, chapter=8)
+
+    assert result.skipped is False
+    assert result.render_result.output_path.name == "008_cap08_nao-vou-ser-usado-pelo-centrao_v001.mp4"
+    assert result.render_result.output_path.exists()
+
+    editorial_dir = project_dir / "editorial" / "008_cap08_nao-vou-ser-usado-pelo-centrao"
+    metadata = json.loads((editorial_dir / "metadata.json").read_text(encoding="utf-8"))
+    assert metadata["status"] == "rendered"
+    assert metadata["final_file"] == "008_cap08_nao-vou-ser-usado-pelo-centrao_v001.mp4"
+
+    log_path = project_dir / "logs" / "pipeline.log"
+    entries = [json.loads(line) for line in log_path.read_text(encoding="utf-8").strip().splitlines()]
+    render_entries = [e for e in entries if e["etapa"] == "render"]
+    assert [e["resultado"] for e in render_entries] == ["iniciado", "ok"]
+
+
+def test_render_editorial_is_idempotent_by_default(tmp_path, monkeypatch):
+    from app.editorial_service import render_editorial
+
+    settings = _settings(tmp_path)
+    _write_generic_brand(settings.brands_dir)
+    project_dir = _make_project(tmp_path)
+    _fake_ffprobe(monkeypatch)
+    _patch_provider(monkeypatch, _FakeEditorialProvider())
+    generate_editorial(project_dir, settings, chapter=8)
+    _patch_renderer(monkeypatch)
+
+    first = render_editorial(project_dir, settings, chapter=8)
+    second = render_editorial(project_dir, settings, chapter=8)
+
+    assert first.skipped is False
+    assert second.skipped is True
+
+
+def test_render_editorial_force_creates_new_version_without_overwriting(tmp_path, monkeypatch):
+    from app.editorial_service import render_editorial
+
+    settings = _settings(tmp_path)
+    _write_generic_brand(settings.brands_dir)
+    project_dir = _make_project(tmp_path)
+    _fake_ffprobe(monkeypatch)
+    _patch_provider(monkeypatch, _FakeEditorialProvider())
+    generate_editorial(project_dir, settings, chapter=8)
+    _patch_renderer(monkeypatch)
+
+    first = render_editorial(project_dir, settings, chapter=8)
+    second = render_editorial(project_dir, settings, chapter=8, force=True)
+
+    assert first.render_result.output_path.name == "008_cap08_nao-vou-ser-usado-pelo-centrao_v001.mp4"
+    assert second.render_result.output_path.name == "008_cap08_nao-vou-ser-usado-pelo-centrao_v002.mp4"
+    assert first.render_result.output_path.exists()
+    assert second.render_result.output_path.exists()
+
+
+def test_render_editorial_propagates_renderer_errors(tmp_path, monkeypatch):
+    from app.editorial_renderer import EditorialRenderError
+    from app.editorial_service import render_editorial
+
+    settings = _settings(tmp_path)
+    _write_generic_brand(settings.brands_dir)
+    project_dir = _make_project(tmp_path)
+    _fake_ffprobe(monkeypatch)
+    _patch_provider(monkeypatch, _FakeEditorialProvider())
+    generate_editorial(project_dir, settings, chapter=8)
+
+    def _fail_render(editorial_plan, cut_path, brand, output_path, settings):
+        raise EditorialRenderError("FFmpeg falhou")
+
+    monkeypatch.setattr(editorial_service_module, "render_editorial_video", _fail_render)
+
+    with pytest.raises(EditorialRenderError):
+        render_editorial(project_dir, settings, chapter=8)
+
+    log_path = project_dir / "logs" / "pipeline.log"
+    entries = [json.loads(line) for line in log_path.read_text(encoding="utf-8").strip().splitlines()]
+    render_entries = [e for e in entries if e["etapa"] == "render"]
+    assert [e["resultado"] for e in render_entries] == ["iniciado", "erro"]

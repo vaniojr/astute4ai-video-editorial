@@ -6,9 +6,10 @@ e lives. Veja `docs/PRD_Video_Editorial.md` para a visão completa do produto.
 Status atual: pipeline completo da Fase 1 do PRD (`init`, `download`,
 `audio`, `transcribe`, `cut`, `status`), automação da análise editorial via
 LLM (`analyze`, Fase A), a Fundação compartilhada (Entrega 8.0 — Brand
-Profile, versionamento, status por capítulo), planejamento editorial
-automático (Entrega 8.1 — `editorialize`: intro/cards/destaques via LLM,
-ainda sem renderização) e a geração de thumbnails (Entrega 9.x —
+Profile, versionamento, status por capítulo), planejamento e renderização
+editorial (Entrega 8.1/8.2 — `editorialize`: intro/cards/destaques via
+LLM; `render`: intro+corte+CTA via FFmpeg, ainda sem cards/lower-thirds
+sobrepostos) e a geração de thumbnails (Entrega 9.x —
 `thumbnail`/`thumbnail-select`: frames reais, briefing, opções de
 headline, abstração de provider de imagem e fluxo de aprovação — ainda
 sem nenhum provider de imagem real conectado). Veja
@@ -237,6 +238,38 @@ plano é só para revisão.
   `metadata.json`.
 
 ```bash
+uv run video-editorial render "projetos/2026-08-12_slug_ID" --chapter 8 --dry-run
+uv run video-editorial render "projetos/2026-08-12_slug_ID" --chapter 8
+```
+
+Renderiza o vídeo final (`final/<mesmo-nome-base-do-corte>_vNNN.mp4`) a
+partir do plano editorial mais recente (ou de uma versão específica via
+`--version N`): **intro → corte → CTA**, concatenados via FFmpeg (filtro
+`concat`, robusto a pequenas diferenças de parâmetro entre a intro/CTA
+geradas na hora e o corte já codificado). Cards de contexto/subtema,
+lower thirds e atribuição de fonte na tela ainda não são renderizados
+(dados já existem no plano, aplicá-los como overlay é uma entrega
+futura).
+
+- **Intro/CTA em texto exigem uma fonte configurada na marca**
+  (`brand.assets.primary_font`, em `brands/<slug>/brand.toml`). Sem
+  fonte, são pulados com um aviso claro — o comando **nunca falha só por
+  isso**, o corte ainda vira um `final/*.mp4` válido (só que sem os
+  cards de texto). Nenhuma marca vem com fonte configurada por padrão.
+- **O `drawtext` do FFmpeg precisa de suporte a `libfreetype`.** O
+  `ffmpeg` instalado via `brew install ffmpeg` no macOS pode não incluir
+  esse filtro (`ffmpeg -filters | grep drawtext` mostra se está
+  disponível) — sem ele, o render com intro/CTA falha com "No such
+  filter: 'drawtext'" mesmo com fonte configurada. Precisa de um build
+  do FFmpeg compilado com `--enable-libfreetype`.
+- Exige que um plano editorial já exista (`editorialize` já ter rodado).
+- `--dry-run`: mostra corte/plano usado/se intro e CTA entram/se a marca
+  tem fonte configurada/arquivo final previsto — **sem chamar o
+  FFmpeg**.
+- Idempotente: se já existir um `final/*.mp4` para o capítulo, não
+  renderiza de novo — `--force` gera uma nova versão, nunca sobrescreve.
+
+```bash
 uv run video-editorial thumbnail "projetos/2026-08-12_slug_ID" --chapter 8 --dry-run
 uv run video-editorial thumbnail "projetos/2026-08-12_slug_ID" --chapter 8
 ```
@@ -279,7 +312,7 @@ para `selected.png` e atualiza `metadata.json` (`"selected"`,
 ## Logs e progresso
 
 Toda execução de `init`/`download`/`audio`/`transcribe`/`analyze`/`cut`/
-`editorialize`/`thumbnail`/`thumbnail-select` grava em `logs/pipeline.log` (uma linha JSON por evento): timestamp, etapa,
+`editorialize`/`render`/`thumbnail`/`thumbnail-select` grava em `logs/pipeline.log` (uma linha JSON por evento): timestamp, etapa,
 comando, resultado (`iniciado`/`ok`/`erro`), erro (quando houver) e
 `duracao_segundos`. A linha `iniciado` é gravada antes de qualquer trabalho
 pesado começar — se o processo travar ou for encerrado no meio, ela já fica
