@@ -214,8 +214,8 @@ uv run video-editorial editorialize "projetos/2026-08-12_slug_ID" --chapter 8
 
 Gera um plano editorial (`editorial_plan_vNNN.json`) para o capítulo já
 cortado, via Claude — intro curta, cards de contexto/subtema, frases de
-destaque. **Não renderiza vídeo nenhum** (isso é uma entrega futura); o
-plano é só para revisão.
+destaque. **Não renderiza vídeo nenhum** — isso é o comando `render`
+(abaixo); o plano aqui é só para revisão antes de renderizar.
 
 - Exige que o corte do capítulo já exista (`cortes/...`) e que
   `transcricao.json` exista (`transcribe` já ter rodado).
