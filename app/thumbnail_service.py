@@ -23,9 +23,10 @@ from app.project import Project, load_project
 from app.thumbnail_briefing import build_briefing, build_headline_options
 from app.thumbnail_frames import FRAME_COUNT, extract_frames
 from app.thumbnail_provider import (
-    ThumbnailProviderError,
+    SUPPORTED_PROVIDERS,
     ThumbnailRequest,
     get_thumbnail_provider,
+    is_supported_provider,
 )
 from app.versioning import format_version, next_version_number
 
@@ -40,6 +41,7 @@ class ThumbnailServiceError(Exception):
 class ThumbnailPlan:
     project_dir: Path
     provider: str
+    model: str
     project: Project
     brand: Brand
     chapter_report: ChapterReport
@@ -51,14 +53,21 @@ class ThumbnailPlan:
 
 
 def plan_thumbnail(
-    project_dir: Path, settings: Settings, *, chapter: int, provider: Optional[str] = None
+    project_dir: Path,
+    settings: Settings,
+    *,
+    chapter: int,
+    provider: Optional[str] = None,
+    model: Optional[str] = None,
 ) -> ThumbnailPlan:
     """Monta o plano do thumbnail sem extrair nenhum frame nem chamar provider (usado por --dry-run)."""
     resolved_provider = provider or settings.thumbnail_provider
-    try:
-        get_thumbnail_provider(resolved_provider)
-    except ThumbnailProviderError as exc:
-        raise ThumbnailServiceError(str(exc)) from exc
+    resolved_model = model or settings.thumbnail_model
+    if not is_supported_provider(resolved_provider):
+        raise ThumbnailServiceError(
+            f"Provider de thumbnail '{resolved_provider}' ainda não implementado. "
+            f"Disponíveis: {', '.join(SUPPORTED_PROVIDERS)}."
+        )
 
     project = load_project(project_dir)
     brand = load_brand(project.brand, settings.brands_dir)
@@ -88,6 +97,7 @@ def plan_thumbnail(
     return ThumbnailPlan(
         project_dir=project_dir,
         provider=resolved_provider,
+        model=resolved_model,
         project=project,
         brand=brand,
         chapter_report=chapter_report,
@@ -115,15 +125,17 @@ def generate_thumbnail(
     *,
     chapter: int,
     provider: Optional[str] = None,
+    model: Optional[str] = None,
     force: bool = False,
 ) -> ThumbnailGenerationResult:
-    plan = plan_thumbnail(project_dir, settings, chapter=chapter, provider=provider)
+    plan = plan_thumbnail(project_dir, settings, chapter=chapter, provider=provider, model=model)
 
     if plan.already_exists and not force:
         return ThumbnailGenerationResult(plan=plan, skipped=True)
 
     comando = (
-        f"thumbnail {project_dir.name} --chapter={chapter} --provider={plan.provider} --force={force}"
+        f"thumbnail {project_dir.name} --chapter={chapter} --provider={plan.provider} "
+        f"--model={plan.model} --force={force}"
     )
 
     with log_operation(project_dir, etapa="thumbnail", comando=comando) as log_extra:
@@ -138,7 +150,7 @@ def generate_thumbnail(
 
         headline_options = build_headline_options(row)
 
-        provider_instance = get_thumbnail_provider(plan.provider)
+        provider_instance = get_thumbnail_provider(plan.provider, model=plan.model)
         thumbnail_request = ThumbnailRequest(
             reference_images=frame_paths,
             briefing=briefing_text,
@@ -163,6 +175,7 @@ def generate_thumbnail(
             "headline_options": headline_options,
             "participants_unknown": True,
             "provider": plan.provider,
+            "model": plan.model,
             "images": [path.name for path in image_paths],
             "selected": None,
             "status": "generated" if image_paths else "briefing_ready",
@@ -172,6 +185,8 @@ def generate_thumbnail(
             json.dumps(metadata, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
         )
 
+        log_extra["provider"] = plan.provider
+        log_extra["model"] = plan.model
         log_extra["frame_count"] = len(frame_paths)
         log_extra["images_generated"] = len(image_paths)
 

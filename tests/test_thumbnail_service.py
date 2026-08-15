@@ -33,6 +33,7 @@ def _settings(tmp_path, thumbnail_provider="manual"):
         default_brand="generic",
         brands_dir=tmp_path / "brands",
         thumbnail_provider=thumbnail_provider,
+        thumbnail_model="gpt-image-1",
         editorial_provider="claude",
         editorial_model="claude-sonnet-5",
         editorial_temperature=0.0,
@@ -133,7 +134,9 @@ class _FakeImageProvider(ThumbnailProvider):
 
 
 def _patch_provider(monkeypatch, provider):
-    monkeypatch.setattr(thumbnail_service_module, "get_thumbnail_provider", lambda name: provider)
+    monkeypatch.setattr(
+        thumbnail_service_module, "get_thumbnail_provider", lambda name, model=None: provider
+    )
 
 
 def test_plan_thumbnail_raises_when_provider_unsupported(tmp_path, monkeypatch):

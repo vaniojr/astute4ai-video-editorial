@@ -1,6 +1,6 @@
 [project]
 name = "video-editorial"
-version = "0.8.0"
+version = "0.9.0"
 description = "Ferramenta local para apoiar a produção editorial de vídeos longos, podcasts e lives."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -10,6 +10,7 @@ dependencies = [
     "faster-whisper>=1.0",
     "anthropic>=0.122.0",
     "python-dotenv>=1.2.2",
+    "openai>=3.1.0",
 ]
 
 [project.scripts]

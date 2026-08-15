@@ -1,10 +1,11 @@
 """Abstração de provider de geração de imagem para thumbnail.
 
-Nenhum SDK de provider real (OpenAI/Google/etc.) é importado aqui nem em
-nenhum outro módulo do projeto enquanto nenhum provider real estiver
-implementado — só "manual" existe por enquanto, e ele nunca gera imagem
-nenhuma (Feature_thumbnail.md seção 27/28): frames + briefing continuam
-disponíveis para uso manual, sem falhar o pipeline.
+Nenhum SDK de provider real é importado aqui — só no arquivo do provider
+concreto (ex.: `app/thumbnail_openai_provider.py`), mesmo isolamento já
+usado por `app/claude_provider.py`/`app/editorial_claude_provider.py`.
+"manual" nunca gera imagem nenhuma (Feature_thumbnail.md seção 27/28):
+frames + briefing continuam disponíveis para uso manual, sem falhar o
+pipeline.
 
 O provider só gera bytes de imagem — nunca decide nome de arquivo ou
 versão. Quem aplica `app/versioning.py` e grava o arquivo final é
@@ -19,7 +20,7 @@ from typing import List, Optional
 
 from app.brands import Brand
 
-_SUPPORTED_PROVIDERS = ("manual",)
+SUPPORTED_PROVIDERS = ("manual", "openai")
 
 
 class ThumbnailProviderError(Exception):
@@ -58,10 +59,24 @@ class ManualThumbnailProvider(ThumbnailProvider):
         return ThumbnailResult(images=[], provider="manual")
 
 
-def get_thumbnail_provider(name: str) -> ThumbnailProvider:
+def is_supported_provider(name: str) -> bool:
+    """Checa o nome sem construir nada — nunca exige credencial.
+
+    Usado por `plan_thumbnail()` (`--dry-run`) para validar `--provider`
+    cedo, sem o custo colateral de `get_thumbnail_provider()` já
+    construir o provider real (que exigiria a API key mesmo em dry-run).
+    """
+    return name in SUPPORTED_PROVIDERS
+
+
+def get_thumbnail_provider(name: str, *, model: Optional[str] = None) -> ThumbnailProvider:
     if name == "manual":
         return ManualThumbnailProvider()
+    if name == "openai":
+        from app.thumbnail_openai_provider import OpenAIThumbnailProvider
+
+        return OpenAIThumbnailProvider(model=model or "gpt-image-1")
     raise ThumbnailProviderError(
         f"Provider de thumbnail '{name}' ainda não implementado. "
-        f"Disponíveis: {', '.join(_SUPPORTED_PROVIDERS)}."
+        f"Disponíveis: {', '.join(SUPPORTED_PROVIDERS)}."
     )

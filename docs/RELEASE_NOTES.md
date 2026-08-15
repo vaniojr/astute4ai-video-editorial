@@ -4,6 +4,14 @@ Resumo em destaques do que cada versão trouxe, pensado para leitura rápida —
 "o que dá pra fazer agora que não dava antes". Para detalhe técnico
 (arquivos, commits, decisões), veja [CHANGELOG.md](CHANGELOG.md).
 
+## v0.9.0 — 2026-08-15
+
+- **Geração real de thumbnail**: `thumbnail --provider openai` já gera a
+  imagem de verdade (via `gpt-image-1`, usando os frames reais extraídos
+  como referência visual — preserva a identidade dos participantes em vez
+  de inventar rostos). `--provider manual` continua sendo o padrão, sem
+  custo. Pede confirmação antes de qualquer chamada paga.
+
 ## v0.8.0 — 2026-08-15
 
 - **Cards e atribuição de fonte no vídeo renderizado**: `render` agora

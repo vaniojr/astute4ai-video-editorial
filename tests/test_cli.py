@@ -1015,7 +1015,7 @@ def _fake_brand():
     )
 
 
-def _fake_thumbnail_plan(project_dir, *, already_exists=False):
+def _fake_thumbnail_plan(project_dir, *, already_exists=False, provider="manual", model="gpt-image-1"):
     row = AnalysisRow(
         ordem_publicacao="8",
         capitulo="8",
@@ -1026,7 +1026,8 @@ def _fake_thumbnail_plan(project_dir, *, already_exists=False):
     chapter_report = ChapterReport(row=row, status="ok", start_seconds=1747.0, end_seconds=2242.0)
     return ThumbnailPlan(
         project_dir=project_dir,
-        provider="manual",
+        provider=provider,
+        model=model,
         project=project_module.load_project(project_dir),
         brand=_fake_brand(),
         chapter_report=chapter_report,
@@ -1041,7 +1042,7 @@ def _fake_thumbnail_plan(project_dir, *, already_exists=False):
 def test_thumbnail_dry_run_prints_plan(tmp_path, monkeypatch):
     project_dir = _create_project(tmp_path, monkeypatch)
     plan = _fake_thumbnail_plan(project_dir)
-    monkeypatch.setattr(cli_main, "plan_thumbnail", lambda pdir, settings, chapter, provider: plan)
+    monkeypatch.setattr(cli_main, "plan_thumbnail", lambda pdir, settings, chapter, provider=None, model=None: plan)
 
     result = runner.invoke(app, ["thumbnail", str(project_dir), "--chapter", "8", "--dry-run"])
 
@@ -1055,7 +1056,7 @@ def test_thumbnail_dry_run_prints_plan(tmp_path, monkeypatch):
 def test_thumbnail_reports_plan_errors(tmp_path, monkeypatch):
     project_dir = _create_project(tmp_path, monkeypatch)
 
-    def _raise(pdir, settings, chapter, provider):
+    def _raise(pdir, settings, chapter, provider=None, model=None):
         raise ThumbnailServiceError("corte não encontrado")
 
     monkeypatch.setattr(cli_main, "plan_thumbnail", _raise)
@@ -1068,7 +1069,7 @@ def test_thumbnail_reports_plan_errors(tmp_path, monkeypatch):
 def test_thumbnail_reports_chapter_not_found(tmp_path, monkeypatch):
     project_dir = _create_project(tmp_path, monkeypatch)
 
-    def _raise(pdir, settings, chapter, provider):
+    def _raise(pdir, settings, chapter, provider=None, model=None):
         raise AnalysisError("nenhum capítulo encontrado")
 
     monkeypatch.setattr(cli_main, "plan_thumbnail", _raise)
@@ -1101,9 +1102,9 @@ def _fake_generation_result(plan, *, image_paths=None):
 def test_thumbnail_generates_frames_and_briefing_without_provider(tmp_path, monkeypatch):
     project_dir = _create_project(tmp_path, monkeypatch)
     plan = _fake_thumbnail_plan(project_dir)
-    monkeypatch.setattr(cli_main, "plan_thumbnail", lambda pdir, settings, chapter, provider: plan)
+    monkeypatch.setattr(cli_main, "plan_thumbnail", lambda pdir, settings, chapter, provider=None, model=None: plan)
 
-    def _fake_generate(pdir, settings, chapter, provider, force):
+    def _fake_generate(pdir, settings, chapter, provider=None, model=None, force=False):
         return _fake_generation_result(plan)
 
     monkeypatch.setattr(cli_main, "generate_thumbnail", _fake_generate)
@@ -1120,9 +1121,9 @@ def test_thumbnail_generates_frames_and_briefing_without_provider(tmp_path, monk
 def test_thumbnail_prints_generated_image_versions(tmp_path, monkeypatch):
     project_dir = _create_project(tmp_path, monkeypatch)
     plan = _fake_thumbnail_plan(project_dir)
-    monkeypatch.setattr(cli_main, "plan_thumbnail", lambda pdir, settings, chapter, provider: plan)
+    monkeypatch.setattr(cli_main, "plan_thumbnail", lambda pdir, settings, chapter, provider=None, model=None: plan)
 
-    def _fake_generate(pdir, settings, chapter, provider, force):
+    def _fake_generate(pdir, settings, chapter, provider=None, model=None, force=False):
         image_paths = [
             plan.thumb_dir / "thumbnail_v001.png",
             plan.thumb_dir / "thumbnail_v002.png",
@@ -1139,10 +1140,59 @@ def test_thumbnail_prints_generated_image_versions(tmp_path, monkeypatch):
     assert "thumbnail-select" in result.stdout
 
 
+def test_thumbnail_manual_provider_skips_confirmation(tmp_path, monkeypatch):
+    project_dir = _create_project(tmp_path, monkeypatch)
+    plan = _fake_thumbnail_plan(project_dir)
+    monkeypatch.setattr(cli_main, "plan_thumbnail", lambda pdir, settings, chapter, provider=None, model=None: plan)
+
+    def _fake_generate(pdir, settings, chapter, provider=None, model=None, force=False):
+        return _fake_generation_result(plan)
+
+    monkeypatch.setattr(cli_main, "generate_thumbnail", _fake_generate)
+
+    result = runner.invoke(app, ["thumbnail", str(project_dir), "--chapter", "8"])
+
+    assert result.exit_code == 0
+    assert "Continuar?" not in result.stdout
+
+
+def test_thumbnail_openai_confirmation_prompt_cancels_without_yes(tmp_path, monkeypatch):
+    project_dir = _create_project(tmp_path, monkeypatch)
+    plan = _fake_thumbnail_plan(project_dir, provider="openai", model="gpt-image-1")
+    monkeypatch.setattr(cli_main, "plan_thumbnail", lambda pdir, settings, chapter, provider=None, model=None: plan)
+
+    def _fail_if_called(*args, **kwargs):
+        raise AssertionError("generate_thumbnail não deveria ser chamado se o usuário cancelar")
+
+    monkeypatch.setattr(cli_main, "generate_thumbnail", _fail_if_called)
+
+    result = runner.invoke(app, ["thumbnail", str(project_dir), "--chapter", "8"], input="n\n")
+
+    assert result.exit_code == 0
+    assert "Cancelado" in result.stdout
+
+
+def test_thumbnail_openai_yes_skips_confirmation_and_calls_service(tmp_path, monkeypatch):
+    project_dir = _create_project(tmp_path, monkeypatch)
+    plan = _fake_thumbnail_plan(project_dir, provider="openai", model="gpt-image-1")
+    monkeypatch.setattr(cli_main, "plan_thumbnail", lambda pdir, settings, chapter, provider=None, model=None: plan)
+
+    def _fake_generate(pdir, settings, chapter, provider=None, model=None, force=False):
+        return _fake_generation_result(plan, image_paths=[plan.thumb_dir / "thumbnail_v001.png"])
+
+    monkeypatch.setattr(cli_main, "generate_thumbnail", _fake_generate)
+
+    result = runner.invoke(app, ["thumbnail", str(project_dir), "--chapter", "8", "--yes"])
+
+    assert result.exit_code == 0
+    assert "Cancelado" not in result.stdout
+    assert "1 thumbnail(s) gerada(s)" in result.stdout
+
+
 def test_thumbnail_skips_when_already_exists_without_force(tmp_path, monkeypatch):
     project_dir = _create_project(tmp_path, monkeypatch)
     plan = _fake_thumbnail_plan(project_dir, already_exists=True)
-    monkeypatch.setattr(cli_main, "plan_thumbnail", lambda pdir, settings, chapter, provider: plan)
+    monkeypatch.setattr(cli_main, "plan_thumbnail", lambda pdir, settings, chapter, provider=None, model=None: plan)
 
     def _fail_if_called(*args, **kwargs):
         raise AssertionError("generate_thumbnail não deveria ser chamado")
@@ -1159,9 +1209,9 @@ def test_thumbnail_skips_when_already_exists_without_force(tmp_path, monkeypatch
 def test_thumbnail_reports_ffmpeg_errors(tmp_path, monkeypatch):
     project_dir = _create_project(tmp_path, monkeypatch)
     plan = _fake_thumbnail_plan(project_dir)
-    monkeypatch.setattr(cli_main, "plan_thumbnail", lambda pdir, settings, chapter, provider: plan)
+    monkeypatch.setattr(cli_main, "plan_thumbnail", lambda pdir, settings, chapter, provider=None, model=None: plan)
 
-    def _raise(pdir, settings, chapter, provider, force):
+    def _raise(pdir, settings, chapter, provider=None, model=None, force=False):
         raise ThumbnailFramesError("FFmpeg falhou")
 
     monkeypatch.setattr(cli_main, "generate_thumbnail", _raise)

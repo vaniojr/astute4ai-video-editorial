@@ -21,6 +21,7 @@ def _settings(tmp_path, max_video_height=None):
         default_brand="generic",
         brands_dir=tmp_path / "brands",
         thumbnail_provider="manual",
+        thumbnail_model="gpt-image-1",
         editorial_provider="claude",
         editorial_model="claude-sonnet-5",
         editorial_temperature=0.0,

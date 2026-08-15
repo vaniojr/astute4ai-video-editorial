@@ -43,6 +43,7 @@ from app.project import (
     update_status,
 )
 from app.thumbnail_frames import ThumbnailFramesError
+from app.thumbnail_provider import ThumbnailProviderError
 from app.thumbnail_service import (
     ThumbnailServiceError,
     generate_thumbnail,
@@ -548,15 +549,17 @@ def thumbnail(
     project: str = typer.Argument(..., help="Nome do diretório em projetos/ ou caminho do projeto."),
     chapter: int = typer.Option(..., "--chapter", help="Número do capítulo (Capitulo no CSV)."),
     provider: Optional[str] = typer.Option(
-        None,
-        "--provider",
-        help="Provider de thumbnail (padrão: configuração). Só 'manual' disponível por enquanto.",
+        None, "--provider", help="Provider de thumbnail (padrão: configuração). 'manual' ou 'openai'."
     ),
+    model: Optional[str] = typer.Option(None, "--model", help="Modelo do provider (padrão: configuração)."),
     dry_run: bool = typer.Option(
         False, "--dry-run", help="Mostra o plano (frames candidatos, briefing previsto) sem gerar nada."
     ),
     force: bool = typer.Option(
         False, "--force", help="Gerar novamente mesmo se já existir frames/briefing para este capítulo."
+    ),
+    yes: bool = typer.Option(
+        False, "--yes", help="Não pedir confirmação antes de chamar um provider pago (uso em automação)."
     ),
 ) -> None:
     """Extrai frames reais do corte, gera o briefing editorial e (com um provider
@@ -573,7 +576,7 @@ def thumbnail(
         raise typer.Exit(code=1)
 
     try:
-        plan = plan_thumbnail(project_dir, settings, chapter=chapter, provider=provider)
+        plan = plan_thumbnail(project_dir, settings, chapter=chapter, provider=provider, model=model)
     except (ThumbnailServiceError, AnalysisError) as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(code=1)
@@ -587,12 +590,20 @@ def thumbnail(
         typer.echo("Use --force para gerar novamente.")
         return
 
+    if plan.provider != "manual" and not yes:
+        typer.echo(f"Provider: {plan.provider}")
+        typer.echo(f"Modelo: {plan.model}")
+        typer.echo("A geração de thumbnail utilizará uma API externa e poderá gerar custos.")
+        if not _confirm_yes_no("Continuar? [s/N] "):
+            typer.echo("Cancelado.")
+            raise typer.Exit(code=0)
+
     typer.echo(f"Extraindo {plan.frame_count} frames de '{plan.cut_path.name}'...")
     try:
         result = generate_thumbnail(
-            project_dir, settings, chapter=chapter, provider=provider, force=force
+            project_dir, settings, chapter=chapter, provider=provider, model=model, force=force
         )
-    except (ThumbnailServiceError, ThumbnailFramesError, AnalysisError) as exc:
+    except (ThumbnailServiceError, ThumbnailFramesError, ThumbnailProviderError, AnalysisError) as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(code=1)
 
@@ -742,6 +753,8 @@ def _print_thumbnail_plan(plan) -> None:
     typer.echo(f"{plan.brand.thumbnail.width}x{plan.brand.thumbnail.height}")
     typer.echo("Provider:")
     typer.echo(plan.provider)
+    typer.echo("Modelo:")
+    typer.echo(plan.model)
     typer.echo("Versões existentes:")
     typer.echo(str(plan.existing_image_versions))
     typer.echo("")

@@ -11,9 +11,9 @@ editorial completos (Entrega 8.1/8.2/8.3 — `editorialize`: intro/cards/
 destaques via LLM; `render`: intro+corte+CTA via FFmpeg, com cards de
 contexto/subtema e atribuição de fonte sobrepostos no corte — só lower
 thirds ainda não, sem registro de participantes) e a geração de
-thumbnails (Entrega 9.x — `thumbnail`/`thumbnail-select`: frames reais,
-briefing, opções de headline, abstração de provider de imagem e fluxo de
-aprovação — ainda sem nenhum provider de imagem real conectado). Veja
+thumbnails completa (Entrega 9.x — `thumbnail`/`thumbnail-select`: frames
+reais, briefing, opções de headline, geração de imagem via OpenAI
+`gpt-image-1` ou modo manual, fluxo de aprovação). Veja
 [docs/PIPELINE.md](docs/PIPELINE.md) para o passo a passo de ponta a ponta,
 [docs/RELEASE_NOTES.md](docs/RELEASE_NOTES.md) para os destaques de cada
 versão e [docs/CHANGELOG.md](docs/CHANGELOG.md) para o histórico detalhado
@@ -27,11 +27,16 @@ Requer [uv](https://docs.astral.sh/uv/).
 uv sync
 ```
 
-Para usar `analyze` (análise editorial automática via Claude), copie
-`.env.example` para `.env` e preencha `ANTHROPIC_API_KEY` com sua chave da
-[API da Anthropic](https://console.anthropic.com/). `.env` nunca é
-versionado (já está no `.gitignore`); `.env.example` não tem segredo e pode
-ser commitado normalmente.
+Para usar `analyze`/`editorialize` (Claude) e `thumbnail --provider openai`
+(geração de imagem), copie `.env.example` para `.env` e preencha:
+
+- `ANTHROPIC_API_KEY` — sua chave da [API da Anthropic](https://console.anthropic.com/).
+- `OPENAI_API_KEY` — sua chave da [API da OpenAI](https://platform.openai.com/api-keys),
+  só necessária se for usar `thumbnail --provider openai` (o padrão,
+  `--provider manual`, não precisa dela).
+
+`.env` nunca é versionado (já está no `.gitignore`); `.env.example` não tem
+segredo e pode ser commitado normalmente.
 
 ## Uso
 
@@ -306,10 +311,18 @@ as thumbnails candidatas em si.
 - Idempotente: se `thumbs/<corte>/metadata.json` já existe, não gera de
   novo — use `--force` (nunca sobrescreve uma imagem já gerada; cada
   execução real cria uma versão nova).
-- `--provider manual` é a única opção disponível por enquanto — não gera
-  nenhuma imagem, só avisa claramente e deixa frames + briefing prontos
-  para uso manual (`app/thumbnail_provider.py` não importa nenhum SDK de
-  geração de imagem ainda).
+- `--provider manual` (padrão) não gera nenhuma imagem — só avisa
+  claramente e deixa frames + briefing prontos para uso manual.
+  `--provider openai` gera a imagem de verdade via `gpt-image-1`
+  (endpoint `images.edit`, que aceita os frames reais extraídos como
+  referência — preserva a identidade visual real dos participantes em
+  vez de inventar rostos do zero). `--model` sobrescreve o modelo
+  (padrão `VIDEO_EDITORIAL_THUMBNAIL_MODEL`, `gpt-image-1`).
+- Com um provider pago (`openai`), pede confirmação antes de gerar —
+  `--yes` pula (mesmo padrão do `analyze`/`editorialize`). `--provider
+  manual` nunca pede confirmação (não tem custo).
+- Gera **1 imagem por chamada real** — para uma alternativa, rode de novo
+  com `--force` (cria `thumbnail_v002.png` sem apagar a anterior).
 - Texto principal e até 3 opções de headline (`headline_options` no
   `metadata.json`) reaproveitam campos do CSV já revisados por humano
   (`Titulo Sugerido`, `Pergunta Principal`, `Tema Principal`) — nenhuma IA

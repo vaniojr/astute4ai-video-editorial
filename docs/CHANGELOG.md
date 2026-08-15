@@ -8,6 +8,40 @@ correspondente (`git show <hash>`) ou o `docs/PRD_Video_Editorial*.md` da
 época. Para um resumo por versão (menos técnico), veja
 [RELEASE_NOTES.md](RELEASE_NOTES.md).
 
+## 2026-08-15 — Entrega 9.2: Thumbnail — geração real de imagem via OpenAI
+
+- Novo provider `openai` (`app/thumbnail_openai_provider.py`, único
+  arquivo que importa o SDK `openai`) — usa `gpt-image-1` via
+  `images.edit()`, não `images.generate()`: só o endpoint de edição
+  aceita múltiplas imagens de referência como entrada, permitindo
+  preservar a identidade visual real dos participantes a partir dos
+  frames reais extraídos na 9.1, em vez de gerar rostos do zero a partir
+  de um prompt textual.
+- `thumbnail --provider openai [--model gpt-image-1]` já funciona de
+  ponta a ponta: prompt montado a partir do `briefing.md` (que já carrega
+  todas as restrições de neutralidade da 9.1) + direção visual da marca
+  (cores, estilo); tamanho da imagem resolvido a partir de
+  `brand.thumbnail.width/height`. `--provider manual` continua sendo o
+  padrão (sem custo).
+- `thumbnail` ganha `--yes`/confirmação antes de qualquer chamada paga —
+  antes não existia esse gate, porque só o modo `manual` (sem custo)
+  estava implementado. Mesmo padrão de `analyze`/`editorialize`.
+- 1 imagem por chamada real — para uma alternativa, `--force` de novo
+  gera uma nova versão (`thumbnail_v002.png`) sem apagar a anterior,
+  reaproveitando o versionamento já pronto da entrega anterior.
+- `get_thumbnail_provider()` ganha o branch `openai` (import tardio,
+  mesmo padrão de `get_editorial_provider`); `plan_thumbnail()`
+  (`--dry-run`) passa a validar o nome do provider via
+  `is_supported_provider()`, sem construir o provider real — evita exigir
+  `OPENAI_API_KEY` só para rodar um dry-run sem custo.
+- `.env.example` ganha `OPENAI_API_KEY=` (vazio) — mesma convenção do
+  `ANTHROPIC_API_KEY`, nunca versionado com valor real.
+- Validado com uma chamada real (paga) à API da OpenAI: corte sintético
+  gerado via FFmpeg, thumbnail real produzida (PNG 1536×1024, tamanho
+  landscape resolvido corretamente a partir de `brand.thumbnail`),
+  idempotência confirmada (segunda execução sem `--force` não gera nova
+  chamada paga) e `thumbnail-select` testado contra a imagem real.
+
 ## 2026-08-15 — Entrega 8.3: Editorial — Cards de contexto/subtema e atribuição de fonte
 
 - `render` agora desenha, **sobre o próprio corte** (não como segmento
