@@ -10,7 +10,7 @@ from app.audio import AudioError, AudioResult
 from app.cutter import CutOutcome, CutRunResult, CutterError
 from app.downloader import DownloadError, DownloadResult
 from app.metadata import MetadataError, VideoMetadata
-from app.transcriber import TranscribeResult, TranscriptionError
+from app.transcriber import TranscribeResult, TranscriptionError, TranscriptSegment
 from cli import main as cli_main
 from cli.main import app
 
@@ -43,6 +43,12 @@ def test_init_creates_project(tmp_path, monkeypatch):
     assert (project_dir / "project.json").is_file()
     assert (project_dir / "01 Fonte.md").is_file()
     assert "Projeto criado" in result.stdout
+    log_path = project_dir / "logs" / "pipeline.log"
+    entries = [json.loads(line) for line in log_path.read_text(encoding="utf-8").strip().splitlines()]
+    assert len(entries) == 1
+    assert entries[0]["etapa"] == "init"
+    assert entries[0]["resultado"] == "ok"
+    assert "duracao_segundos" in entries[0]
 
 
 def test_init_is_idempotent(tmp_path, monkeypatch):
@@ -90,9 +96,15 @@ def test_download_creates_file_and_updates_status(tmp_path, monkeypatch):
     result = runner.invoke(app, ["download", str(project_dir)])
 
     assert result.exit_code == 0
+    assert "Baixando vídeo..." in result.stdout
     assert "Download concluído" in result.stdout
     data = json.loads((project_dir / "project.json").read_text(encoding="utf-8"))
     assert data["status"] == "downloaded"
+    log_path = project_dir / "logs" / "pipeline.log"
+    all_entries = [json.loads(line) for line in log_path.read_text(encoding="utf-8").strip().splitlines()]
+    entries = [e for e in all_entries if e["etapa"] == "download"]
+    assert [e["resultado"] for e in entries] == ["iniciado", "ok"]
+    assert "duracao_segundos" in entries[1]
 
 
 def test_download_reports_existing_file_without_changing_status(tmp_path, monkeypatch):
@@ -148,9 +160,14 @@ def test_audio_creates_file_and_updates_status(tmp_path, monkeypatch):
     result = runner.invoke(app, ["audio", str(project_dir)])
 
     assert result.exit_code == 0
+    assert "Extraindo áudio..." in result.stdout
     assert "Áudio extraído" in result.stdout
     data = json.loads((project_dir / "project.json").read_text(encoding="utf-8"))
     assert data["status"] == "audio_ready"
+    log_path = project_dir / "logs" / "pipeline.log"
+    all_entries = [json.loads(line) for line in log_path.read_text(encoding="utf-8").strip().splitlines()]
+    entries = [e for e in all_entries if e["etapa"] == "audio"]
+    assert [e["resultado"] for e in entries] == ["iniciado", "ok"]
 
 
 def test_audio_reports_existing_file_without_changing_status(tmp_path, monkeypatch):
@@ -195,7 +212,9 @@ def test_audio_reports_project_not_found(tmp_path, monkeypatch):
 def test_transcribe_creates_files_and_updates_status(tmp_path, monkeypatch):
     project_dir = _create_project(tmp_path, monkeypatch)
 
-    def _fake_transcribe(pdir, settings, force=False):
+    def _fake_transcribe(pdir, settings, force=False, on_segment=None):
+        if on_segment is not None:
+            on_segment(TranscriptSegment(index=0, start_seconds=0.0, end_seconds=4.2, text="Ola"))
         md_path = pdir / "02 Transcricao.md"
         json_path = pdir / "transcricao.json"
         md_path.write_text("# Transcrição", encoding="utf-8")
@@ -207,15 +226,21 @@ def test_transcribe_creates_files_and_updates_status(tmp_path, monkeypatch):
     result = runner.invoke(app, ["transcribe", str(project_dir)])
 
     assert result.exit_code == 0
+    assert "Transcrevendo áudio" in result.stdout
+    assert "[00:00:00 → 00:00:04] transcrito" in result.stdout
     assert "Transcrição concluída" in result.stdout
     data = json.loads((project_dir / "project.json").read_text(encoding="utf-8"))
     assert data["status"] == "transcribed"
+    log_path = project_dir / "logs" / "pipeline.log"
+    all_entries = [json.loads(line) for line in log_path.read_text(encoding="utf-8").strip().splitlines()]
+    entries = [e for e in all_entries if e["etapa"] == "transcribe"]
+    assert [e["resultado"] for e in entries] == ["iniciado", "ok"]
 
 
 def test_transcribe_reports_existing_file_without_changing_status(tmp_path, monkeypatch):
     project_dir = _create_project(tmp_path, monkeypatch)
 
-    def _fake_transcribe(pdir, settings, force=False):
+    def _fake_transcribe(pdir, settings, force=False, on_segment=None):
         return TranscribeResult(
             md_path=pdir / "02 Transcricao.md", json_path=pdir / "transcricao.json", skipped=True
         )
@@ -328,6 +353,7 @@ def test_analyze_yes_skips_confirmation_and_calls_service(tmp_path, monkeypatch)
     result = runner.invoke(app, ["analyze", str(project_dir), "--yes"])
 
     assert result.exit_code == 0
+    assert "Chamando a API da Claude" in result.stdout
     assert "Análise concluída" in result.stdout
 
 
@@ -431,7 +457,9 @@ def test_cut_generates_real_cuts_and_advances_status(tmp_path, monkeypatch):
 
     output_path = project_dir / "cortes" / "001_cap08_titulo.mp4"
 
-    def _fake_generate_cuts(rep, pdir, settings, mode="precise"):
+    def _fake_generate_cuts(rep, pdir, settings, mode="precise", on_progress=None):
+        if on_progress is not None:
+            on_progress(rep.chapters[0])
         output_path.parent.mkdir(parents=True, exist_ok=True)
         output_path.write_bytes(b"fake")
         outcome = CutOutcome(chapter=rep.chapters[0], status="cut", output_path=output_path)
@@ -442,10 +470,17 @@ def test_cut_generates_real_cuts_and_advances_status(tmp_path, monkeypatch):
     result = runner.invoke(app, ["cut", str(project_dir)])
 
     assert result.exit_code == 0
+    assert "Cortando: Capítulo 08..." in result.stdout
     assert "Cortes gerados:" in result.stdout
     assert "[CORTADO] Capítulo 08" in result.stdout
     data = json.loads((project_dir / "project.json").read_text(encoding="utf-8"))
     assert data["status"] == "cut"
+    log_path = project_dir / "logs" / "pipeline.log"
+    all_entries = [json.loads(line) for line in log_path.read_text(encoding="utf-8").strip().splitlines()]
+    entries = [e for e in all_entries if e["etapa"] == "cut"]
+    assert [e["resultado"] for e in entries] == ["iniciado", "ok"]
+    assert entries[1]["cortes_gerados"] == 1
+    assert "duracao_segundos" in entries[1]
 
 
 def test_cut_does_not_advance_status_when_nothing_cut(tmp_path, monkeypatch):
@@ -455,7 +490,7 @@ def test_cut_does_not_advance_status_when_nothing_cut(tmp_path, monkeypatch):
     report = _report_with_chapters(project_dir, [chapter])
     monkeypatch.setattr(cli_main, "build_dry_run_report", lambda pdir: report)
 
-    def _fake_generate_cuts(rep, pdir, settings, mode="precise"):
+    def _fake_generate_cuts(rep, pdir, settings, mode="precise", on_progress=None):
         outcome = CutOutcome(chapter=rep.chapters[0], status="skipped_ineligible")
         return CutRunResult(outcomes=[outcome])
 
@@ -477,7 +512,7 @@ def test_cut_fast_mode_prints_keyframe_warning(tmp_path, monkeypatch):
     monkeypatch.setattr(
         cli_main,
         "generate_cuts",
-        lambda rep, pdir, settings, mode="precise": CutRunResult(outcomes=[]),
+        lambda rep, pdir, settings, mode="precise", on_progress=None: CutRunResult(outcomes=[]),
     )
 
     result = runner.invoke(app, ["cut", str(project_dir), "--mode", "fast"])
@@ -514,7 +549,7 @@ def test_cut_applies_chapter_filter(tmp_path, monkeypatch):
 
     captured = {}
 
-    def _fake_generate_cuts(rep, pdir, settings, mode="precise"):
+    def _fake_generate_cuts(rep, pdir, settings, mode="precise", on_progress=None):
         captured["chapters"] = rep.chapters
         return CutRunResult(outcomes=[])
 

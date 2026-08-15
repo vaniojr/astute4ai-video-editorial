@@ -156,7 +156,7 @@ def test_plan_analysis_reports_char_count_and_defaults(tmp_path):
 
 def test_plan_analysis_warns_on_long_transcript(tmp_path):
     settings = _settings(tmp_path)
-    project_dir = _make_project(tmp_path, transcript_text="x" * 200_000)
+    project_dir = _make_project(tmp_path, transcript_text="x" * 500_000)
 
     plan = plan_analysis(project_dir, settings)
 

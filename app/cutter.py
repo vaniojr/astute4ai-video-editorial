@@ -9,7 +9,7 @@ import shutil
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Optional
+from typing import Callable, List, Optional
 
 from app.analysis import ChapterReport, DryRunReport
 from app.config import Settings
@@ -40,7 +40,12 @@ class CutRunResult:
 
 
 def generate_cuts(
-    report: DryRunReport, project_dir: Path, settings: Settings, *, mode: str = "precise"
+    report: DryRunReport,
+    project_dir: Path,
+    settings: Settings,
+    *,
+    mode: str = "precise",
+    on_progress: Optional[Callable[[ChapterReport], None]] = None,
 ) -> CutRunResult:
     if mode not in _MODES:
         raise CutterError(f"Modo inválido: '{mode}'. Use 'precise' ou 'fast'.")
@@ -73,6 +78,9 @@ def generate_cuts(
                 CutOutcome(chapter=chapter, status="skipped_exists", output_path=output_path)
             )
             continue
+
+        if on_progress is not None:
+            on_progress(chapter)
 
         try:
             _run_ffmpeg_cut(

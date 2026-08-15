@@ -168,8 +168,19 @@ são cortadas; um erro do FFmpeg numa linha não interrompe as demais.
 Filtros combináveis (seção 19 do PRD): `--priority A`, `--chapter 8`,
 `--order 14` — funcionam tanto com `--dry-run` quanto na geração real.
 
-Cada execução de `cut` grava uma linha em `logs/pipeline.log` (timestamp,
-etapa, comando, resultado e erro, quando houver).
+## Logs e progresso
+
+Toda execução de `init`/`download`/`audio`/`transcribe`/`analyze`/`cut`
+grava em `logs/pipeline.log` (uma linha JSON por evento): timestamp, etapa,
+comando, resultado (`iniciado`/`ok`/`erro`), erro (quando houver) e
+`duracao_segundos`. A linha `iniciado` é gravada antes de qualquer trabalho
+pesado começar — se o processo travar ou for encerrado no meio, ela já fica
+registrada, mesmo sem a linha final. `status` não grava nada (é só leitura).
+
+Etapas demoradas mostram progresso no terminal enquanto rodam:
+`transcribe` imprime cada trecho conforme é transcrito, `cut` avisa qual
+capítulo está cortando antes de cada arquivo, e `download`/`audio`/`analyze`
+avisam quando o trabalho pesado está começando.
 
 ```bash
 uv run video-editorial status "projetos/2026-08-12_slug_ID"

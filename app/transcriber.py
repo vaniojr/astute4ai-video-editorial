@@ -9,7 +9,7 @@ import json
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List
+from typing import Callable, List, Optional
 
 from faster_whisper import WhisperModel
 
@@ -39,7 +39,9 @@ class TranscriptionResult:
 
 class TranscriptionProvider(ABC):
     @abstractmethod
-    def transcribe(self, audio_path: Path) -> TranscriptionResult: ...
+    def transcribe(
+        self, audio_path: Path, *, on_segment: Optional[Callable[[TranscriptSegment], None]] = None
+    ) -> TranscriptionResult: ...
 
 
 class FasterWhisperProvider(TranscriptionProvider):
@@ -47,19 +49,23 @@ class FasterWhisperProvider(TranscriptionProvider):
         self._model_size = model_size
         self._language = language
 
-    def transcribe(self, audio_path: Path) -> TranscriptionResult:
+    def transcribe(
+        self, audio_path: Path, *, on_segment: Optional[Callable[[TranscriptSegment], None]] = None
+    ) -> TranscriptionResult:
         try:
             model = WhisperModel(self._model_size, device="cpu", compute_type="int8")
             segments_iter, info = model.transcribe(str(audio_path), language=self._language)
-            segments = [
-                TranscriptSegment(
+            segments = []
+            for i, segment in enumerate(segments_iter):
+                transcript_segment = TranscriptSegment(
                     index=i,
                     start_seconds=segment.start,
                     end_seconds=segment.end,
                     text=segment.text.strip(),
                 )
-                for i, segment in enumerate(segments_iter)
-            ]
+                segments.append(transcript_segment)
+                if on_segment is not None:
+                    on_segment(transcript_segment)
         except Exception as exc:
             raise TranscriptionError(
                 "Não foi possível transcrever o áudio com faster-whisper.\n\n"
@@ -79,7 +85,13 @@ class TranscribeResult:
     skipped: bool
 
 
-def transcribe_project(project_dir: Path, settings: Settings, *, force: bool = False) -> TranscribeResult:
+def transcribe_project(
+    project_dir: Path,
+    settings: Settings,
+    *,
+    force: bool = False,
+    on_segment: Optional[Callable[[TranscriptSegment], None]] = None,
+) -> TranscribeResult:
     audio_path = project_dir / "audio" / "audio.wav"
     if not audio_path.exists():
         raise TranscriptionError(
@@ -95,7 +107,7 @@ def transcribe_project(project_dir: Path, settings: Settings, *, force: bool = F
         return TranscribeResult(md_path=md_path, json_path=json_path, skipped=True)
 
     provider = FasterWhisperProvider(model_size=settings.whisper_model, language=settings.whisper_language)
-    result = provider.transcribe(audio_path)
+    result = provider.transcribe(audio_path, on_segment=on_segment)
 
     _write_markdown(md_path, result)
     _write_json(json_path, result)

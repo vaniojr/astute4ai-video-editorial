@@ -1,5 +1,6 @@
 """CLI do video-editorial (PRD seção 24)."""
 
+import time
 from dataclasses import replace
 from enum import Enum
 from pathlib import Path
@@ -20,7 +21,7 @@ from app.audio import AudioError, extract_audio
 from app.config import load_settings
 from app.cutter import CutRunResult, CutterError, generate_cuts
 from app.downloader import DownloadError, download_video
-from app.logging_utils import log_event
+from app.logging_utils import log_event, log_operation
 from app.metadata import MetadataError
 from app.project import (
     ProjectNotFoundError,
@@ -50,19 +51,39 @@ def _callback() -> None:
 @app.command()
 def init(url: str = typer.Argument(..., help="URL do vídeo de origem (ex.: YouTube).")) -> None:
     """Cria um novo projeto a partir de uma URL de vídeo."""
+    # Sem log_operation aqui: o diretório do projeto (onde logs/pipeline.log
+    # mora) só existe DEPOIS que create_project() já terminou — não há onde
+    # gravar um "iniciado" antes disso. Registra só o resultado final.
+    start = time.monotonic()
     try:
         result = create_project(url)
     except MetadataError as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(code=1)
 
+    duracao = round(time.monotonic() - start, 1)
+
     if result.already_existed:
+        log_event(
+            result.path,
+            etapa="init",
+            comando=f"init {url}",
+            resultado="ok",
+            extra={"duracao_segundos": duracao},
+        )
         typer.echo("Projeto já existente:\n")
         typer.echo(str(result.path))
         return
 
     project = result.project
     assert project is not None
+    log_event(
+        result.path,
+        etapa="init",
+        comando=f"init {url}",
+        resultado="ok",
+        extra={"duracao_segundos": duracao},
+    )
     typer.echo("Projeto criado:\n")
     typer.echo(str(result.path))
     typer.echo("")
@@ -87,8 +108,10 @@ def download(
 
     proj = load_project(project_dir)
 
+    typer.echo("Baixando vídeo...")
     try:
-        result = download_video(project_dir, proj.source_url, settings, force=force)
+        with log_operation(project_dir, etapa="download", comando=f"download {project} --force={force}"):
+            result = download_video(project_dir, proj.source_url, settings, force=force)
     except DownloadError as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(code=1)
@@ -116,8 +139,10 @@ def audio(
         typer.echo(str(exc), err=True)
         raise typer.Exit(code=1)
 
+    typer.echo("Extraindo áudio...")
     try:
-        result = extract_audio(project_dir, force=force)
+        with log_operation(project_dir, etapa="audio", comando=f"audio {project} --force={force}"):
+            result = extract_audio(project_dir, force=force)
     except AudioError as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(code=1)
@@ -145,8 +170,15 @@ def transcribe(
         typer.echo(str(exc), err=True)
         raise typer.Exit(code=1)
 
+    def _on_segment(segment) -> None:
+        start = format_hms(segment.start_seconds)
+        end = format_hms(segment.end_seconds)
+        typer.echo(f"[{start} → {end}] transcrito")
+
+    typer.echo("Transcrevendo áudio (pode demorar bastante para vídeos longos)...")
     try:
-        result = transcribe_project(project_dir, settings, force=force)
+        with log_operation(project_dir, etapa="transcribe", comando=f"transcribe {project} --force={force}"):
+            result = transcribe_project(project_dir, settings, force=force, on_segment=_on_segment)
     except TranscriptionError as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(code=1)
@@ -213,11 +245,14 @@ def analyze(
             typer.echo("Cancelado.")
             raise typer.Exit(code=0)
 
-    comando = f"analyze {project} --provider={provider} --model={model} --force={force}"
+    typer.echo(
+        f"Chamando a API da Claude ({plan.provider}/{plan.model}) — pode levar de segundos a minutos..."
+    )
     try:
+        # analyze_project() já registra início/fim (com uso de tokens) em
+        # logs/pipeline.log internamente — não duplicamos o log aqui.
         result = analyze_project(project_dir, settings, provider=provider, model=model, force=force)
     except AnalysisServiceError as exc:
-        log_event(project_dir, etapa="analyze", comando=comando, resultado="erro", erro=str(exc))
         typer.echo(str(exc), err=True)
         raise typer.Exit(code=1)
 
@@ -276,11 +311,15 @@ def cut(
         f"cut {project} --dry-run={dry_run} --mode={mode.value} "
         f"--priority={priority} --chapter={chapter} --order={order}"
     )
+    start = time.monotonic()
 
     if dry_run:
         _print_dry_run_report(report)
         advance_status(project_dir, "analyzed")
-        log_event(project_dir, etapa="cut", comando=comando, resultado="ok")
+        duracao = round(time.monotonic() - start, 1)
+        log_event(
+            project_dir, etapa="cut", comando=comando, resultado="ok", extra={"duracao_segundos": duracao}
+        )
         return
 
     if mode == CutMode.fast:
@@ -288,22 +327,41 @@ def cut(
             "Modo rápido utiliza keyframes e pode não iniciar exatamente no timestamp editorial.\n"
         )
 
+    def _on_progress(chapter: ChapterReport) -> None:
+        typer.echo(f"Cortando: Capítulo {chapter.row.capitulo}...")
+
+    # "iniciado" só é gravado a partir daqui: as etapas acima (ler o CSV,
+    # aplicar filtros) já rodaram para montar o relatório e são rápidas —
+    # o corte em si (FFmpeg) é a parte demorada que queremos rastrear.
+    log_event(project_dir, etapa="cut", comando=comando, resultado="iniciado")
     try:
-        cut_result = generate_cuts(report, project_dir, settings, mode=mode.value)
+        cut_result = generate_cuts(
+            report, project_dir, settings, mode=mode.value, on_progress=_on_progress
+        )
     except CutterError as exc:
-        log_event(project_dir, etapa="cut", comando=comando, resultado="erro", erro=str(exc))
+        duracao = round(time.monotonic() - start, 1)
+        log_event(
+            project_dir,
+            etapa="cut",
+            comando=comando,
+            resultado="erro",
+            erro=str(exc),
+            extra={"duracao_segundos": duracao},
+        )
         typer.echo(str(exc), err=True)
         raise typer.Exit(code=1)
 
     _print_cut_report(report, cut_result)
 
     has_errors = any(outcome.status == "error" for outcome in cut_result.outcomes)
+    duracao = round(time.monotonic() - start, 1)
     log_event(
         project_dir,
         etapa="cut",
         comando=comando,
         resultado="erro" if has_errors else "ok",
         erro="uma ou mais linhas falharam; ver relatório" if has_errors else None,
+        extra={"duracao_segundos": duracao, "cortes_gerados": cut_result.cut_count},
     )
 
     if cut_result.cut_count > 0:

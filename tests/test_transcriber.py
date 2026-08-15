@@ -76,6 +76,23 @@ def test_faster_whisper_provider_maps_segments(monkeypatch):
     assert result.segments[1].index == 1
 
 
+def test_faster_whisper_provider_calls_on_segment_as_produced(monkeypatch):
+    segments = [
+        _FakeSegment(start=0.0, end=4.2, text="Primeiro"),
+        _FakeSegment(start=4.2, end=9.0, text="Segundo"),
+    ]
+    monkeypatch.setattr(
+        transcriber_module, "WhisperModel", _make_fake_whisper_model(segments, result_language="en")
+    )
+
+    seen = []
+    provider = FasterWhisperProvider(model_size="tiny", language="en")
+    result = provider.transcribe(Path("/fake/audio.wav"), on_segment=seen.append)
+
+    assert [s.text for s in seen] == ["Primeiro", "Segundo"]
+    assert seen == list(result.segments)
+
+
 def test_faster_whisper_provider_wraps_errors(monkeypatch):
     monkeypatch.setattr(
         transcriber_module,
@@ -114,6 +131,24 @@ def test_transcribe_project_creates_md_and_json(tmp_path, monkeypatch):
     assert json_data["language"] == "en"
     assert len(json_data["segments"]) == 2
     assert json_data["segments"][0]["text"] == "Hello world"
+
+
+def test_transcribe_project_forwards_on_segment_callback(tmp_path, monkeypatch):
+    project_dir = _make_project_with_audio(tmp_path)
+    settings = _settings(tmp_path)
+    segments = [
+        _FakeSegment(start=0.0, end=4.2, text="Hello world"),
+        _FakeSegment(start=4.2, end=9.0, text="Second segment"),
+    ]
+    monkeypatch.setattr(
+        transcriber_module, "WhisperModel", _make_fake_whisper_model(segments, result_language="en")
+    )
+
+    seen = []
+    transcribe_project(project_dir, settings, on_segment=seen.append)
+
+    assert len(seen) == 2
+    assert seen[0].text == "Hello world"
 
 
 def test_transcribe_project_raises_when_audio_missing(tmp_path):

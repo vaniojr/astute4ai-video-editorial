@@ -26,7 +26,7 @@ from app.analysis import (
     write_analysis_csv,
 )
 from app.config import Settings
-from app.logging_utils import log_event
+from app.logging_utils import log_operation
 from app.project import advance_status, load_project
 from app.timestamps import (
     TimestampAmbiguousError,
@@ -43,8 +43,11 @@ _TRANSCRICAO_FILENAME = "02 Transcricao.md"
 
 # Acima disso, o dry-run avisa que a transcrição pode ultrapassar o
 # praticável numa única chamada — chunking real é Fase B, ainda não
-# implementado.
-_LONG_TRANSCRIPT_CHAR_THRESHOLD = 100_000
+# implementado. ~400 mil caracteres ainda ficam com folga sob o limite de
+# contexto real dos modelos Claude atuais (~100 mil tokens em português);
+# o valor anterior (100 mil caracteres, ~25-35 mil tokens) disparava o
+# aviso para transcrições normais de vídeo longo.
+_LONG_TRANSCRIPT_CHAR_THRESHOLD = 400_000
 
 
 class AnalysisServiceError(Exception):
@@ -200,60 +203,55 @@ def analyze_project(
     if plan.already_exists and not force:
         return AnalyzeResult(plan=plan, skipped=True)
 
-    project = load_project(project_dir)
-    request = AnalysisRequest(
-        source_content=plan.source_path.read_text(encoding="utf-8"),
-        transcript_content=plan.transcript_path.read_text(encoding="utf-8"),
-        system_instructions=_load_prompt("system.md"),
-        editorial_instructions=_load_prompt("editorial.md"),
-        metadata={
-            "titulo": project.title,
-            "canal": project.channel or "",
-            "duracao_segundos": str(project.duration_seconds or ""),
-        },
-    )
+    comando = f"analyze {project_dir.name} --provider={plan.provider} --model={plan.model} --force={force}"
 
-    analysis_provider = get_analysis_provider(
-        plan.provider, model=plan.model, temperature=settings.analysis_temperature
-    )
-    result = analysis_provider.analyze(request)
-
-    if not result.chapters:
-        raise AnalysisServiceError(
-            f"O provider '{plan.provider}' não retornou nenhum capítulo para esta transcrição."
+    with log_operation(project_dir, etapa="analyze", comando=comando) as log_extra:
+        project = load_project(project_dir)
+        request = AnalysisRequest(
+            source_content=plan.source_path.read_text(encoding="utf-8"),
+            transcript_content=plan.transcript_path.read_text(encoding="utf-8"),
+            system_instructions=_load_prompt("system.md"),
+            editorial_instructions=_load_prompt("editorial.md"),
+            metadata={
+                "titulo": project.title,
+                "canal": project.channel or "",
+                "duracao_segundos": str(project.duration_seconds or ""),
+            },
         )
 
-    video_path = project_dir / "original" / "video-original.mp4"
-    video_duration = get_video_duration_seconds(video_path) if video_path.exists() else None
+        analysis_provider = get_analysis_provider(
+            plan.provider, model=plan.model, temperature=settings.analysis_temperature
+        )
+        result = analysis_provider.analyze(request)
 
-    ordered = _consolidate(result.chapters)
-    rows = [
-        _to_analysis_row(candidate, ordem_publicacao=i, capitulo=i, video_duration=video_duration)
-        for i, candidate in enumerate(ordered, start=1)
-    ]
+        if not result.chapters:
+            raise AnalysisServiceError(
+                f"O provider '{plan.provider}' não retornou nenhum capítulo para esta transcrição."
+            )
 
-    write_analysis_csv(plan.csv_path, rows)
-    advance_status(project_dir, "analyzed")
+        video_path = project_dir / "original" / "video-original.mp4"
+        video_duration = get_video_duration_seconds(video_path) if video_path.exists() else None
 
-    try:
-        dry_run_report = build_dry_run_report(project_dir)
-    except AnalysisError:
-        # CSV já foi escrito com sucesso; só não há vídeo para validar contra
-        # (situação incomum — 'transcribe' já exige 'download' antes).
-        dry_run_report = None
+        ordered = _consolidate(result.chapters)
+        rows = [
+            _to_analysis_row(candidate, ordem_publicacao=i, capitulo=i, video_duration=video_duration)
+            for i, candidate in enumerate(ordered, start=1)
+        ]
 
-    log_event(
-        project_dir,
-        etapa="analyze",
-        comando=f"analyze {project_dir.name} --provider={plan.provider} --model={plan.model} --force={force}",
-        resultado="ok",
-        extra={
-            "provider": plan.provider,
-            "model": plan.model,
-            "input_tokens": result.usage.input_tokens if result.usage else None,
-            "output_tokens": result.usage.output_tokens if result.usage else None,
-        },
-    )
+        write_analysis_csv(plan.csv_path, rows)
+        advance_status(project_dir, "analyzed")
+
+        try:
+            dry_run_report = build_dry_run_report(project_dir)
+        except AnalysisError:
+            # CSV já foi escrito com sucesso; só não há vídeo para validar contra
+            # (situação incomum — 'transcribe' já exige 'download' antes).
+            dry_run_report = None
+
+        log_extra["provider"] = plan.provider
+        log_extra["model"] = plan.model
+        log_extra["input_tokens"] = result.usage.input_tokens if result.usage else None
+        log_extra["output_tokens"] = result.usage.output_tokens if result.usage else None
 
     return AnalyzeResult(plan=plan, skipped=False, dry_run_report=dry_run_report, usage=result.usage)
 

@@ -81,6 +81,42 @@ def test_generate_cuts_creates_file_with_expected_name(tmp_path, monkeypatch):
     assert outcome.output_path.exists()
 
 
+def test_generate_cuts_calls_on_progress_before_each_eligible_cut(tmp_path, monkeypatch):
+    settings = _settings(tmp_path)
+    _patch_ffmpeg(monkeypatch)
+    project_dir, report = _make_report(
+        tmp_path,
+        [
+            _ok_chapter(ordem_publicacao="1", capitulo="1"),
+            _ok_chapter(ordem_publicacao="2", capitulo="2"),
+        ],
+    )
+
+    seen = []
+    result = generate_cuts(report, project_dir, settings, on_progress=seen.append)
+
+    assert len(seen) == 2
+    assert [c.row.capitulo for c in seen] == ["1", "2"]
+    assert result.cut_count == 2
+
+
+def test_generate_cuts_does_not_call_on_progress_for_ineligible_chapters(tmp_path, monkeypatch):
+    settings = _settings(tmp_path)
+    row = AnalysisRow(ordem_publicacao="1", capitulo="1", acao_editorial="Unir")
+    chapter = ChapterReport(row=row, status="manual_action", message="requer edição manual")
+    project_dir, report = _make_report(tmp_path, [chapter])
+
+    def _fail_if_called(cmd, capture_output=True, text=True):
+        raise AssertionError("ffmpeg não deveria ser chamado")
+
+    monkeypatch.setattr(cutter_module.subprocess, "run", _fail_if_called)
+
+    seen = []
+    generate_cuts(report, project_dir, settings, on_progress=seen.append)
+
+    assert seen == []
+
+
 def test_generate_cuts_precise_mode_uses_libx264_with_settings(tmp_path, monkeypatch):
     settings = _settings(tmp_path)
     captured = {}

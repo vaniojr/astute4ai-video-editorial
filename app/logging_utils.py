@@ -6,6 +6,8 @@ cookies ou segredos.
 """
 
 import json
+import time
+from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -40,3 +42,44 @@ def log_event(
     log_path.parent.mkdir(parents=True, exist_ok=True)
     with log_path.open("a", encoding="utf-8") as fh:
         fh.write(json.dumps(entry, ensure_ascii=False) + "\n")
+
+
+@contextmanager
+def log_operation(project_dir: Path, *, etapa: str, comando: str):
+    """Grava início + fim (com duração) de uma etapa em `logs/pipeline.log`.
+
+    Grava `resultado="iniciado"` ao entrar — se o processo travar ou for
+    encerrado no meio, essa linha já fica registrada. Ao sair, grava
+    `resultado="ok"` ou `"erro"` com `duracao_segundos`, e relança qualquer
+    exceção original (quem chama continua tratando `DownloadError`/etc.
+    normalmente).
+
+    Produz (`yield`) um dicionário mutável — quem usa o `with` pode inserir
+    campos nele (ex.: `extra["input_tokens"] = ...`) para que apareçam na
+    linha final de sucesso, junto com `duracao_segundos`.
+    """
+    log_event(project_dir, etapa=etapa, comando=comando, resultado="iniciado")
+    start = time.monotonic()
+    extra: dict = {}
+    try:
+        yield extra
+    except Exception as exc:
+        duracao = round(time.monotonic() - start, 1)
+        log_event(
+            project_dir,
+            etapa=etapa,
+            comando=comando,
+            resultado="erro",
+            erro=str(exc),
+            extra={"duracao_segundos": duracao, **extra},
+        )
+        raise
+    else:
+        duracao = round(time.monotonic() - start, 1)
+        log_event(
+            project_dir,
+            etapa=etapa,
+            comando=comando,
+            resultado="ok",
+            extra={"duracao_segundos": duracao, **extra},
+        )
