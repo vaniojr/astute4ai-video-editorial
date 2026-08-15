@@ -5,9 +5,10 @@ e lives. Veja `docs/PRD_Video_Editorial.md` para a visão completa do produto.
 
 Status atual: pipeline completo da Fase 1 do PRD (`init`, `download`,
 `audio`, `transcribe`, `cut`, `status`), automação da análise editorial via
-LLM (`analyze`, Fase A) e a Fundação compartilhada (Entrega 8.0) para as
-próximas features de editorialização e thumbnail — Brand Profile,
-versionamento e status por capítulo. Veja
+LLM (`analyze`, Fase A), a Fundação compartilhada (Entrega 8.0 — Brand
+Profile, versionamento, status por capítulo) e o início da geração de
+thumbnails (Entrega 9.1 — `thumbnail`: frames reais + briefing, ainda sem
+geração de imagem). Veja
 [docs/PIPELINE.md](docs/PIPELINE.md) para o passo a passo de ponta a ponta,
 [docs/RELEASE_NOTES.md](docs/RELEASE_NOTES.md) para os destaques de cada
 versão e [docs/CHANGELOG.md](docs/CHANGELOG.md) para o histórico detalhado
@@ -196,10 +197,36 @@ são cortadas; um erro do FFmpeg numa linha não interrompe as demais.
 Filtros combináveis (seção 19 do PRD): `--priority A`, `--chapter 8`,
 `--order 14` — funcionam tanto com `--dry-run` quanto na geração real.
 
+```bash
+uv run video-editorial thumbnail "projetos/2026-08-12_slug_ID" --chapter 8 --dry-run
+uv run video-editorial thumbnail "projetos/2026-08-12_slug_ID" --chapter 8
+```
+
+Extrai 9 frames reais do corte já gerado (`cortes/`, nunca do vídeo
+original — o corte já está no intervalo certo) e gera um `briefing.md`
+editorial determinístico a partir da linha do `03 Analise.csv` e do Brand
+Profile do projeto — **ainda sem geração de imagem** (Fase 9.1; conectar um
+provider de imagem fica para uma entrega futura).
+
+- Exige que o corte do capítulo já exista (`cortes/...`) — roda `cut`
+  primeiro se faltar.
+- `--dry-run`: mostra projeto/capítulo/intervalo/tema/brand/quantidade de
+  frames/tamanho da thumbnail configurado, **sem chamar FFmpeg**.
+- Idempotente: se `thumbs/<corte>/metadata.json` já existe, não gera de
+  novo — use `--force`.
+- `--provider manual` é a única opção por enquanto (a única disponível
+  antes de um provider de geração de imagem existir).
+- Texto principal sugerido reaproveita `Titulo Sugerido` do CSV (já
+  revisado por humano) — nenhuma IA gera headline nesta fase.
+  `participants_unknown` sempre `true` no `metadata.json`: sem registro de
+  participantes ainda, a ferramenta nunca inventa nome.
+- Saída em `thumbs/<mesmo-nome-base-do-corte>/`: `frames/frame-01.jpg`...`frame-09.jpg`,
+  `briefing.md`, `metadata.json`.
+
 ## Logs e progresso
 
-Toda execução de `init`/`download`/`audio`/`transcribe`/`analyze`/`cut`
-grava em `logs/pipeline.log` (uma linha JSON por evento): timestamp, etapa,
+Toda execução de `init`/`download`/`audio`/`transcribe`/`analyze`/`cut`/
+`thumbnail` grava em `logs/pipeline.log` (uma linha JSON por evento): timestamp, etapa,
 comando, resultado (`iniciado`/`ok`/`erro`), erro (quando houver) e
 `duracao_segundos`. A linha `iniciado` é gravada antes de qualquer trabalho
 pesado começar — se o processo travar ou for encerrado no meio, ela já fica
@@ -219,8 +246,8 @@ Mostra título, canal, URL, Brand Profile, o `status` atual do pipeline
 `cut`) e quais artefatos já existem (vídeo original, áudio, transcrição,
 `03 Analise.csv`, quantidade de arquivos em `cortes/`). Se `03 Analise.csv`
 já existir, mostra também uma quebra por capítulo elegível (`Manter`) —
-por ora só se o corte já foi gerado; editorialização/thumbnail entram
-nessa mesma lista nas próximas entregas.
+por ora só se o corte já foi gerado; editorialização/geração de imagem da
+thumbnail entram nessa mesma lista em entregas futuras.
 
 ## Testes
 

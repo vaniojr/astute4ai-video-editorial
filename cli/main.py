@@ -33,6 +33,8 @@ from app.project import (
     resolve_project_dir,
     update_status,
 )
+from app.thumbnail_frames import ThumbnailFramesError
+from app.thumbnail_service import ThumbnailServiceError, generate_thumbnail_briefing, plan_thumbnail
 from app.timestamps import format_hms
 from app.transcriber import TranscriptionError, transcribe_project
 
@@ -383,6 +385,69 @@ def cut(
 
 
 @app.command()
+def thumbnail(
+    project: str = typer.Argument(..., help="Nome do diretório em projetos/ ou caminho do projeto."),
+    chapter: int = typer.Option(..., "--chapter", help="Número do capítulo (Capitulo no CSV)."),
+    provider: Optional[str] = typer.Option(
+        None,
+        "--provider",
+        help="Provider de thumbnail (padrão: configuração). Só 'manual' disponível por enquanto.",
+    ),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Mostra o plano (frames candidatos, briefing previsto) sem gerar nada."
+    ),
+    force: bool = typer.Option(
+        False, "--force", help="Gerar novamente mesmo se já existir frames/briefing para este capítulo."
+    ),
+) -> None:
+    """Extrai frames reais do corte e gera o briefing editorial da thumbnail.
+
+    Fase 9.1: sem geração de imagem ainda — só frames + briefing (modo manual).
+    """
+    settings = load_settings()
+    try:
+        project_dir = resolve_project_dir(project, settings)
+    except ProjectNotFoundError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1)
+
+    try:
+        plan = plan_thumbnail(project_dir, settings, chapter=chapter, provider=provider)
+    except (ThumbnailServiceError, AnalysisError) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1)
+
+    if dry_run:
+        _print_thumbnail_plan(plan)
+        return
+
+    if plan.already_exists and not force:
+        typer.echo(f"Frames/briefing já existem para o capítulo {chapter}.")
+        typer.echo("Use --force para gerar novamente.")
+        return
+
+    typer.echo(f"Extraindo {plan.frame_count} frames de '{plan.cut_path.name}'...")
+    try:
+        result = generate_thumbnail_briefing(
+            project_dir, settings, chapter=chapter, provider=provider, force=force
+        )
+    except (ThumbnailServiceError, ThumbnailFramesError, AnalysisError) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1)
+
+    if result.skipped:
+        typer.echo(f"Frames/briefing já existem para o capítulo {chapter}.")
+        typer.echo("Use --force para gerar novamente.")
+        return
+
+    typer.echo("Concluído:\n")
+    typer.echo(str(plan.thumb_dir))
+    typer.echo(f"- {len(result.frame_paths)} frame(s) em frames/")
+    typer.echo("- briefing.md")
+    typer.echo("- metadata.json")
+
+
+@app.command()
 def status(
     project: str = typer.Argument(
         ..., help="Nome do diretório em projetos/, caminho, ou source_id do vídeo."
@@ -456,6 +521,29 @@ def _print_analysis_plan(plan) -> None:
     typer.echo("")
     typer.echo("DRY RUN")
     typer.echo("Nenhuma chamada de API realizada.")
+
+
+def _print_thumbnail_plan(plan) -> None:
+    row = plan.chapter_report.row
+    typer.echo("Projeto:")
+    typer.echo(plan.project_dir.name)
+    typer.echo("Capítulo:")
+    typer.echo(row.capitulo)
+    typer.echo("Intervalo:")
+    typer.echo(f"{format_hms(plan.chapter_report.start_seconds)} → {format_hms(plan.chapter_report.end_seconds)}")
+    typer.echo("Tema:")
+    typer.echo(row.tema_principal or "(não informado)")
+    typer.echo("Brand:")
+    typer.echo(plan.brand.name)
+    typer.echo("Frames candidatos:")
+    typer.echo(str(plan.frame_count))
+    typer.echo("Thumbnail:")
+    typer.echo(f"{plan.brand.thumbnail.width}x{plan.brand.thumbnail.height}")
+    typer.echo("Provider:")
+    typer.echo(plan.provider)
+    typer.echo("")
+    typer.echo("DRY RUN")
+    typer.echo("Nenhuma imagem final será gerada.")
 
 
 def _confirm_yes_no(prompt: str) -> bool:

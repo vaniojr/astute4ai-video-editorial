@@ -8,6 +8,35 @@ correspondente (`git show <hash>`) ou o `docs/PRD_Video_Editorial*.md` da
 época. Para um resumo por versão (menos técnico), veja
 [RELEASE_NOTES.md](RELEASE_NOTES.md).
 
+## 2026-08-15 — Entrega 9.1: Thumbnail — frames + briefing (modo manual)
+
+- Novo comando `video-editorial thumbnail PROJECT --chapter N [--dry-run]
+  [--force]`: extrai 9 frames reais do corte já gerado (`cortes/`, nunca
+  do vídeo original) e gera `briefing.md` editorial determinístico —
+  **ainda sem geração de imagem**, que fica para uma entrega futura.
+- `app/thumbnail_frames.py`: posições de frame igualmente espaçadas
+  (cobrem início/25%/50%/75%/final do corte como caso particular do
+  espaçamento uniforme); uma falha do FFmpeg aborta a extração inteira
+  (diferente do `cut` — extração de frame é barata o bastante pra não
+  valer a pena um resultado parcial).
+- `app/thumbnail_briefing.py`: texto principal sugerido reaproveita
+  `Titulo Sugerido` do CSV (já revisado por humano, nenhuma IA gera
+  headline nesta fase); `participants_unknown` sempre `true` — sem
+  registro de participantes ainda, nunca inventa nome; restrição extra de
+  neutralidade quando `Trecho para Validar Primeiro`/`Observacoes` está
+  preenchido (mesma regra já usada no `analyze`).
+- `app/thumbnail_service.py`: reaproveita `select_single_chapter` e
+  `build_cut_filename` (Fundação 8.0) — exige que o corte do capítulo já
+  exista; idempotente por padrão (`--force` regenera); log via
+  `log_operation` (`etapa="thumbnail"`).
+- `--provider manual` é a única opção por enquanto — `ThumbnailProvider`
+  (ABC/factory) ainda não existe, propositalmente: com um único caminho de
+  código, essa abstração seria prematura.
+- Saída em `thumbs/<mesmo-nome-base-do-corte>/frames/`, `briefing.md`,
+  `metadata.json`.
+- Validado manualmente com FFmpeg real (frames JPEG reais extraídos de um
+  corte real, não mockado).
+
 ## 2026-08-15 — Entrega 8.0: Fundação compartilhada (Brand Profile, versionamento, status por capítulo)
 
 - **Brand Profile**: novo conceito transversal, usado pela editorialização

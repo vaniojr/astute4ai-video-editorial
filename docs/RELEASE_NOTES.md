@@ -4,6 +4,14 @@ Resumo em destaques do que cada versão trouxe, pensado para leitura rápida —
 "o que dá pra fazer agora que não dava antes". Para detalhe técnico
 (arquivos, commits, decisões), veja [CHANGELOG.md](CHANGELOG.md).
 
+## v0.4.0 — 2026-08-15
+
+- **Geração de thumbnails, primeira etapa**: novo comando `thumbnail`
+  extrai frames reais do corte já gerado e monta um briefing editorial
+  (tema, resumo, texto sugerido, restrições de neutralidade) — ainda sem
+  gerar a imagem final, que entra numa próxima versão. Já dá pra revisar
+  frames + briefing e escrever a thumbnail manualmente a partir deles.
+
 ## v0.3.0 — 2026-08-15
 
 - **Brand Profile**: todo projeto agora tem uma identidade de marca

@@ -18,6 +18,7 @@ def test_load_settings_defaults(monkeypatch):
         "VIDEO_EDITORIAL_ANALYSIS_TEMPERATURE",
         "VIDEO_EDITORIAL_DEFAULT_BRAND",
         "VIDEO_EDITORIAL_BRANDS_DIR",
+        "VIDEO_EDITORIAL_THUMBNAIL_PROVIDER",
     ):
         monkeypatch.delenv(var, raising=False)
 
@@ -36,6 +37,7 @@ def test_load_settings_defaults(monkeypatch):
     assert settings.analysis_temperature == 0.0
     assert settings.default_brand == "generic"
     assert settings.brands_dir == Path("brands")
+    assert settings.thumbnail_provider == "manual"
 
 
 def test_load_settings_reads_env_var_overrides(monkeypatch, tmp_path):
@@ -52,6 +54,7 @@ def test_load_settings_reads_env_var_overrides(monkeypatch, tmp_path):
     monkeypatch.setenv("VIDEO_EDITORIAL_ANALYSIS_TEMPERATURE", "0.5")
     monkeypatch.setenv("VIDEO_EDITORIAL_DEFAULT_BRAND", "bussola-politica")
     monkeypatch.setenv("VIDEO_EDITORIAL_BRANDS_DIR", str(tmp_path / "outras-brands"))
+    monkeypatch.setenv("VIDEO_EDITORIAL_THUMBNAIL_PROVIDER", "outro-provider")
 
     settings = load_settings()
 
@@ -68,3 +71,4 @@ def test_load_settings_reads_env_var_overrides(monkeypatch, tmp_path):
     assert settings.analysis_temperature == 0.5
     assert settings.default_brand == "bussola-politica"
     assert settings.brands_dir == tmp_path / "outras-brands"
+    assert settings.thumbnail_provider == "outro-provider"

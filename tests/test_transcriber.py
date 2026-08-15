@@ -47,6 +47,7 @@ def _settings(tmp_path, whisper_model="tiny", whisper_language="en"):
         analysis_temperature=0.0,
         default_brand="generic",
         brands_dir=tmp_path / "brands",
+        thumbnail_provider="manual",
     )
 
 

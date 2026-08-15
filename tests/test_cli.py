@@ -7,9 +7,12 @@ from app import project as project_module
 from app.analysis import AnalysisError, AnalysisRow, ChapterReport, DryRunReport
 from app.analyzer import AnalysisPlan, AnalysisServiceError, AnalyzeResult
 from app.audio import AudioError, AudioResult
+from app.brands import Brand, BrandAssets, BrandColors, BrandFeatures, BrandThumbnailConfig, BrandVideoConfig
 from app.cutter import CutOutcome, CutRunResult, CutterError
 from app.downloader import DownloadError, DownloadResult
 from app.metadata import MetadataError, VideoMetadata
+from app.thumbnail_frames import ThumbnailFramesError
+from app.thumbnail_service import ThumbnailBriefingResult, ThumbnailPlan, ThumbnailServiceError
 from app.transcriber import TranscribeResult, TranscriptionError, TranscriptSegment
 from cli import main as cli_main
 from cli.main import app
@@ -630,6 +633,153 @@ def test_cut_reports_project_not_found(tmp_path, monkeypatch):
     monkeypatch.setenv("VIDEO_EDITORIAL_PROJETOS_DIR", str(tmp_path / "projetos"))
 
     result = runner.invoke(app, ["cut", "nao-existe", "--dry-run"])
+
+    assert result.exit_code == 1
+
+
+def _fake_brand():
+    return Brand(
+        slug="generic",
+        name="Genérico",
+        colors=BrandColors(),
+        features=BrandFeatures(),
+        assets=BrandAssets(),
+        video=BrandVideoConfig(),
+        thumbnail=BrandThumbnailConfig(),
+    )
+
+
+def _fake_thumbnail_plan(project_dir, *, already_exists=False):
+    row = AnalysisRow(
+        ordem_publicacao="8",
+        capitulo="8",
+        acao_editorial="Manter",
+        tema_principal="Governabilidade",
+        titulo_sugerido="Não vou ser usado pelo Centrão",
+    )
+    chapter_report = ChapterReport(row=row, status="ok", start_seconds=1747.0, end_seconds=2242.0)
+    return ThumbnailPlan(
+        project_dir=project_dir,
+        provider="manual",
+        project=project_module.load_project(project_dir),
+        brand=_fake_brand(),
+        chapter_report=chapter_report,
+        cut_path=project_dir / "cortes" / "008_cap08_nao-vou-ser-usado-pelo-centrao.mp4",
+        thumb_dir=project_dir / "thumbs" / "008_cap08_nao-vou-ser-usado-pelo-centrao",
+        frame_count=9,
+        already_exists=already_exists,
+    )
+
+
+def test_thumbnail_dry_run_prints_plan(tmp_path, monkeypatch):
+    project_dir = _create_project(tmp_path, monkeypatch)
+    plan = _fake_thumbnail_plan(project_dir)
+    monkeypatch.setattr(cli_main, "plan_thumbnail", lambda pdir, settings, chapter, provider: plan)
+
+    result = runner.invoke(app, ["thumbnail", str(project_dir), "--chapter", "8", "--dry-run"])
+
+    assert result.exit_code == 0
+    assert "Capítulo:" in result.stdout
+    assert "Governabilidade" in result.stdout
+    assert "DRY RUN" in result.stdout
+    assert "Nenhuma imagem final será gerada." in result.stdout
+
+
+def test_thumbnail_reports_plan_errors(tmp_path, monkeypatch):
+    project_dir = _create_project(tmp_path, monkeypatch)
+
+    def _raise(pdir, settings, chapter, provider):
+        raise ThumbnailServiceError("corte não encontrado")
+
+    monkeypatch.setattr(cli_main, "plan_thumbnail", _raise)
+
+    result = runner.invoke(app, ["thumbnail", str(project_dir), "--chapter", "8", "--dry-run"])
+
+    assert result.exit_code == 1
+
+
+def test_thumbnail_reports_chapter_not_found(tmp_path, monkeypatch):
+    project_dir = _create_project(tmp_path, monkeypatch)
+
+    def _raise(pdir, settings, chapter, provider):
+        raise AnalysisError("nenhum capítulo encontrado")
+
+    monkeypatch.setattr(cli_main, "plan_thumbnail", _raise)
+
+    result = runner.invoke(app, ["thumbnail", str(project_dir), "--chapter", "99", "--dry-run"])
+
+    assert result.exit_code == 1
+
+
+def test_thumbnail_generates_frames_and_briefing(tmp_path, monkeypatch):
+    project_dir = _create_project(tmp_path, monkeypatch)
+    plan = _fake_thumbnail_plan(project_dir)
+    monkeypatch.setattr(cli_main, "plan_thumbnail", lambda pdir, settings, chapter, provider: plan)
+
+    frame_paths = [plan.thumb_dir / "frames" / f"frame-{i:02d}.jpg" for i in range(1, 10)]
+
+    def _fake_generate(pdir, settings, chapter, provider, force):
+        plan.thumb_dir.mkdir(parents=True, exist_ok=True)
+        (plan.thumb_dir / "frames").mkdir(exist_ok=True)
+        for p in frame_paths:
+            p.write_bytes(b"fake")
+        briefing_path = plan.thumb_dir / "briefing.md"
+        briefing_path.write_text("briefing", encoding="utf-8")
+        metadata_path = plan.thumb_dir / "metadata.json"
+        metadata_path.write_text("{}", encoding="utf-8")
+        return ThumbnailBriefingResult(
+            plan=plan,
+            skipped=False,
+            frame_paths=frame_paths,
+            briefing_path=briefing_path,
+            metadata_path=metadata_path,
+        )
+
+    monkeypatch.setattr(cli_main, "generate_thumbnail_briefing", _fake_generate)
+
+    result = runner.invoke(app, ["thumbnail", str(project_dir), "--chapter", "8"])
+
+    assert result.exit_code == 0
+    assert "Concluído" in result.stdout
+    assert "9 frame(s) em frames/" in result.stdout
+
+
+def test_thumbnail_skips_when_already_exists_without_force(tmp_path, monkeypatch):
+    project_dir = _create_project(tmp_path, monkeypatch)
+    plan = _fake_thumbnail_plan(project_dir, already_exists=True)
+    monkeypatch.setattr(cli_main, "plan_thumbnail", lambda pdir, settings, chapter, provider: plan)
+
+    def _fail_if_called(*args, **kwargs):
+        raise AssertionError("generate_thumbnail_briefing não deveria ser chamado")
+
+    monkeypatch.setattr(cli_main, "generate_thumbnail_briefing", _fail_if_called)
+
+    result = runner.invoke(app, ["thumbnail", str(project_dir), "--chapter", "8"])
+
+    assert result.exit_code == 0
+    assert "já existem" in result.stdout
+    assert "--force" in result.stdout
+
+
+def test_thumbnail_reports_ffmpeg_errors(tmp_path, monkeypatch):
+    project_dir = _create_project(tmp_path, monkeypatch)
+    plan = _fake_thumbnail_plan(project_dir)
+    monkeypatch.setattr(cli_main, "plan_thumbnail", lambda pdir, settings, chapter, provider: plan)
+
+    def _raise(pdir, settings, chapter, provider, force):
+        raise ThumbnailFramesError("FFmpeg falhou")
+
+    monkeypatch.setattr(cli_main, "generate_thumbnail_briefing", _raise)
+
+    result = runner.invoke(app, ["thumbnail", str(project_dir), "--chapter", "8"])
+
+    assert result.exit_code == 1
+
+
+def test_thumbnail_reports_project_not_found(tmp_path, monkeypatch):
+    monkeypatch.setenv("VIDEO_EDITORIAL_PROJETOS_DIR", str(tmp_path / "projetos"))
+
+    result = runner.invoke(app, ["thumbnail", "nao-existe", "--chapter", "8", "--dry-run"])
 
     assert result.exit_code == 1
 

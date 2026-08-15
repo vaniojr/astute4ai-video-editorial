@@ -41,6 +41,7 @@ def _settings(tmp_path, default_brand="generic"):
         analysis_temperature=0.0,
         default_brand=default_brand,
         brands_dir=brands_dir,
+        thumbnail_provider="manual",
     )
 
 

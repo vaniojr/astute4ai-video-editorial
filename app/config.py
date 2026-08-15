@@ -26,6 +26,7 @@ class Settings:
     analysis_temperature: float
     default_brand: str
     brands_dir: Path
+    thumbnail_provider: str
 
 
 def load_settings() -> Settings:
@@ -44,4 +45,5 @@ def load_settings() -> Settings:
         analysis_temperature=float(os.environ.get("VIDEO_EDITORIAL_ANALYSIS_TEMPERATURE", "0")),
         default_brand=os.environ.get("VIDEO_EDITORIAL_DEFAULT_BRAND", "generic"),
         brands_dir=Path(os.environ.get("VIDEO_EDITORIAL_BRANDS_DIR", "brands")),
+        thumbnail_provider=os.environ.get("VIDEO_EDITORIAL_THUMBNAIL_PROVIDER", "manual"),
     )
