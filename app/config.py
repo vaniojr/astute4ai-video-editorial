@@ -32,6 +32,8 @@ class Settings:
     editorial_temperature: float
     editorial_intro_seconds: float
     editorial_cta_seconds: float
+    editorial_card_seconds: float
+    editorial_source_attribution_seconds: float
 
 
 def load_settings() -> Settings:
@@ -56,4 +58,8 @@ def load_settings() -> Settings:
         editorial_temperature=float(os.environ.get("VIDEO_EDITORIAL_EDITORIAL_TEMPERATURE", "0")),
         editorial_intro_seconds=float(os.environ.get("VIDEO_EDITORIAL_EDITORIAL_INTRO_SECONDS", "10")),
         editorial_cta_seconds=float(os.environ.get("VIDEO_EDITORIAL_EDITORIAL_CTA_SECONDS", "5")),
+        editorial_card_seconds=float(os.environ.get("VIDEO_EDITORIAL_EDITORIAL_CARD_SECONDS", "4")),
+        editorial_source_attribution_seconds=float(
+            os.environ.get("VIDEO_EDITORIAL_EDITORIAL_SOURCE_ATTRIBUTION_SECONDS", "4")
+        ),
     )

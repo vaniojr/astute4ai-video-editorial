@@ -7,12 +7,13 @@ Status atual: pipeline completo da Fase 1 do PRD (`init`, `download`,
 `audio`, `transcribe`, `cut`, `status`), automação da análise editorial via
 LLM (`analyze`, Fase A), a Fundação compartilhada (Entrega 8.0 — Brand
 Profile, versionamento, status por capítulo), planejamento e renderização
-editorial (Entrega 8.1/8.2 — `editorialize`: intro/cards/destaques via
-LLM; `render`: intro+corte+CTA via FFmpeg, ainda sem cards/lower-thirds
-sobrepostos) e a geração de thumbnails (Entrega 9.x —
-`thumbnail`/`thumbnail-select`: frames reais, briefing, opções de
-headline, abstração de provider de imagem e fluxo de aprovação — ainda
-sem nenhum provider de imagem real conectado). Veja
+editorial completos (Entrega 8.1/8.2/8.3 — `editorialize`: intro/cards/
+destaques via LLM; `render`: intro+corte+CTA via FFmpeg, com cards de
+contexto/subtema e atribuição de fonte sobrepostos no corte — só lower
+thirds ainda não, sem registro de participantes) e a geração de
+thumbnails (Entrega 9.x — `thumbnail`/`thumbnail-select`: frames reais,
+briefing, opções de headline, abstração de provider de imagem e fluxo de
+aprovação — ainda sem nenhum provider de imagem real conectado). Veja
 [docs/PIPELINE.md](docs/PIPELINE.md) para o passo a passo de ponta a ponta,
 [docs/RELEASE_NOTES.md](docs/RELEASE_NOTES.md) para os destaques de cada
 versão e [docs/CHANGELOG.md](docs/CHANGELOG.md) para o histórico detalhado
@@ -244,18 +245,26 @@ uv run video-editorial render "projetos/2026-08-12_slug_ID" --chapter 8
 
 Renderiza o vídeo final (`final/<mesmo-nome-base-do-corte>_vNNN.mp4`) a
 partir do plano editorial mais recente (ou de uma versão específica via
-`--version N`): **intro → corte → CTA**, concatenados via FFmpeg (filtro
-`concat`, robusto a pequenas diferenças de parâmetro entre a intro/CTA
-geradas na hora e o corte já codificado). Cards de contexto/subtema,
-lower thirds e atribuição de fonte na tela ainda não são renderizados
-(dados já existem no plano, aplicá-los como overlay é uma entrega
-futura).
+`--version N`): **intro → corte (com cards de contexto/subtema e
+atribuição de fonte sobrepostos) → CTA**. Intro/CTA são segmentos
+concatenados via FFmpeg (filtro `concat`, robusto a pequenas diferenças
+de parâmetro entre eles e o corte já codificado); cards e atribuição de
+fonte são desenhados **sobre** o próprio corte (`drawtext` com janela de
+tempo `enable=between(t,início,fim)`), não segmentos novos — aparecem e
+somem no timestamp certo, calculado pelo código na 8.1 (nunca pela IA).
+Lower thirds ainda não são renderizados: o dado nunca é preenchido (sem
+registro de participantes), não há nada a desenhar ainda.
 
-- **Intro/CTA em texto exigem uma fonte configurada na marca**
-  (`brand.assets.primary_font`, em `brands/<slug>/brand.toml`). Sem
-  fonte, são pulados com um aviso claro — o comando **nunca falha só por
-  isso**, o corte ainda vira um `final/*.mp4` válido (só que sem os
-  cards de texto). Nenhuma marca vem com fonte configurada por padrão.
+- **Intro/CTA/cards/atribuição de fonte em texto exigem uma fonte
+  configurada na marca** (`brand.assets.primary_font`, em
+  `brands/<slug>/brand.toml`). Sem fonte, todos são pulados com um aviso
+  claro — o comando **nunca falha só por isso**, o corte ainda vira um
+  `final/*.mp4` válido (só que sem os elementos de texto). Nenhuma marca
+  vem com fonte configurada por padrão.
+- No máximo 4 cards são renderizados por corte, mesmo que o plano tenha
+  mais (proteção contra o modelo devolver mais do que o prompt pede) —
+  cards vazios/em branco são ignorados. Sobreposição entre cards muito
+  próximos não é evitada nesta versão.
 - **O `drawtext` do FFmpeg precisa de suporte a `libfreetype`/`fontconfig`,
   que o formula padrão `ffmpeg` do Homebrew não inclui** (`ffmpeg -filters
   | grep drawtext` mostra se está disponível) — sem isso, o render com
@@ -272,9 +281,9 @@ futura).
   `libfreetype`/`fontconfig`/`libass` e outros) — `ffmpeg`/`ffprobe` no
   PATH passam a apontar para ele, sem precisar mudar nada no projeto.
 - Exige que um plano editorial já exista (`editorialize` já ter rodado).
-- `--dry-run`: mostra corte/plano usado/se intro e CTA entram/se a marca
-  tem fonte configurada/arquivo final previsto — **sem chamar o
-  FFmpeg**.
+- `--dry-run`: mostra corte/plano usado/se intro, CTA, cards e atribuição
+  de fonte entram/se a marca tem fonte configurada/arquivo final previsto
+  — **sem chamar o FFmpeg**.
 - Idempotente: se já existir um `final/*.mp4` para o capítulo, não
   renderiza de novo — `--force` gera uma nova versão, nunca sobrescreve.
 

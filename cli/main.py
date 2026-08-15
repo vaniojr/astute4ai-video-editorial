@@ -534,6 +534,10 @@ def render(
     typer.echo("")
     typer.echo(f"Intro incluída: {'sim' if render_result.intro_included else 'não'}")
     typer.echo(f"CTA incluído: {'sim' if render_result.cta_included else 'não'}")
+    typer.echo(f"Cards incluídos: {render_result.cards_included}")
+    typer.echo(
+        f"Atribuição de fonte incluída: {'sim' if render_result.source_attribution_included else 'não'}"
+    )
     if render_result.skipped_text_reason:
         typer.echo("")
         typer.echo(render_result.skipped_text_reason)
@@ -784,9 +788,15 @@ def _print_render_plan(plan) -> None:
     typer.echo("sim" if editorial_plan.intro.mode == "text_only" else "não")
     typer.echo("CTA:")
     typer.echo("sim" if editorial_plan.cta.enabled else "não")
+    typer.echo("Cards:")
+    typer.echo(str(len(editorial_plan.context_cards)))
+    typer.echo("Atribuição de fonte:")
+    typer.echo("sim" if editorial_plan.source_attribution.text else "não")
     typer.echo("Fonte da marca configurada:")
     font = plan.brand.assets.primary_font
-    typer.echo("sim" if font and font.is_file() else "não (intro/CTA em texto seriam pulados)")
+    typer.echo(
+        "sim" if font and font.is_file() else "não (intro/CTA/cards/atribuição de fonte em texto seriam pulados)"
+    )
     typer.echo("Arquivo final previsto:")
     typer.echo(plan.output_path.name)
     typer.echo("")

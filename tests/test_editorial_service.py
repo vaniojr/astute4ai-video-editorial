@@ -38,6 +38,8 @@ def _settings(tmp_path):
         editorial_temperature=0.0,
         editorial_intro_seconds=10.0,
         editorial_cta_seconds=5.0,
+        editorial_card_seconds=4.0,
+        editorial_source_attribution_seconds=4.0,
     )
 
 

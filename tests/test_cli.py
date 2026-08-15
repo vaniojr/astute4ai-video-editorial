@@ -693,7 +693,14 @@ def _fake_render_generation_result(plan, **result_overrides):
     from app.editorial_renderer import RenderResult
     from app.editorial_service import EditorialRenderGenerationResult
 
-    render_defaults = dict(output_path=plan.output_path, intro_included=True, cta_included=True, skipped_text_reason=None)
+    render_defaults = dict(
+        output_path=plan.output_path,
+        intro_included=True,
+        cta_included=True,
+        cards_included=0,
+        source_attribution_included=True,
+        skipped_text_reason=None,
+    )
     render_defaults.update(result_overrides)
     plan.output_path.parent.mkdir(parents=True, exist_ok=True)
     plan.output_path.write_bytes(b"fake final video")
@@ -716,6 +723,8 @@ def test_render_dry_run_prints_plan_without_calling_ffmpeg(tmp_path, monkeypatch
     assert "DRY RUN" in result.stdout
     assert "Nenhum vídeo será gerado." in result.stdout
     assert "v001" in result.stdout
+    assert "Cards:" in result.stdout
+    assert "Atribuição de fonte:" in result.stdout
 
 
 def test_render_generates_final_video_and_prints_summary(tmp_path, monkeypatch):
@@ -733,6 +742,23 @@ def test_render_generates_final_video_and_prints_summary(tmp_path, monkeypatch):
     assert "Vídeo final gerado" in result.stdout
     assert "Intro incluída: sim" in result.stdout
     assert "CTA incluído: sim" in result.stdout
+    assert "Cards incluídos: 0" in result.stdout
+    assert "Atribuição de fonte incluída: sim" in result.stdout
+
+
+def test_render_prints_card_count_when_present(tmp_path, monkeypatch):
+    project_dir = _create_project(tmp_path, monkeypatch)
+    plan = _fake_render_editorial_plan(project_dir)
+    monkeypatch.setattr(cli_main, "plan_render", lambda pdir, settings, chapter, version=None: plan)
+    fake_result = _fake_render_generation_result(plan, cards_included=3)
+    monkeypatch.setattr(
+        cli_main, "render_editorial", lambda pdir, settings, chapter, version=None, force=False: fake_result
+    )
+
+    result = runner.invoke(app, ["render", str(project_dir), "--chapter", "8"])
+
+    assert result.exit_code == 0
+    assert "Cards incluídos: 3" in result.stdout
 
 
 def test_render_prints_skipped_text_reason(tmp_path, monkeypatch):

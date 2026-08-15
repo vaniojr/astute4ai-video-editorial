@@ -53,6 +53,8 @@ def _settings(tmp_path, whisper_model="tiny", whisper_language="en"):
         editorial_temperature=0.0,
         editorial_intro_seconds=10.0,
         editorial_cta_seconds=5.0,
+        editorial_card_seconds=4.0,
+        editorial_source_attribution_seconds=4.0,
     )
 
 

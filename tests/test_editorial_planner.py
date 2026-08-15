@@ -148,6 +148,32 @@ def test_build_editorial_plan_converts_fraction_to_seconds():
     assert plan.intro.text == "Intro de teste"
 
 
+def test_build_editorial_plan_caps_context_cards_at_four():
+    candidate = EditorialCandidate(
+        intro_text="",
+        context_cards=[
+            RawContextCard(kind="context", text=f"CARD {i}", position_fraction=i / 10) for i in range(7)
+        ],
+        highlights=[],
+    )
+
+    plan = build_editorial_plan(
+        candidate,
+        chapter="8",
+        cut_file="008_cap08_teste.mp4",
+        brand=_brand(),
+        project=_project(),
+        version=1,
+        provider="claude",
+        model="claude-sonnet-5",
+        cut_duration_seconds=100.0,
+        transcript_segments=[],
+    )
+
+    assert len(plan.context_cards) == 4
+    assert [c.text for c in plan.context_cards] == ["CARD 0", "CARD 1", "CARD 2", "CARD 3"]
+
+
 def test_build_editorial_plan_clamps_out_of_range_fraction():
     candidate = EditorialCandidate(
         intro_text="",

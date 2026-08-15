@@ -4,6 +4,18 @@ Resumo em destaques do que cada versão trouxe, pensado para leitura rápida —
 "o que dá pra fazer agora que não dava antes". Para detalhe técnico
 (arquivos, commits, decisões), veja [CHANGELOG.md](CHANGELOG.md).
 
+## v0.8.0 — 2026-08-15
+
+- **Cards e atribuição de fonte no vídeo renderizado**: `render` agora
+  desenha os cards de contexto/subtema e a atribuição de fonte do plano
+  editorial diretamente sobre o corte, aparecendo e sumindo no momento
+  certo — antes só intro/CTA eram renderizados. Falta só identificar
+  participantes na tela (lower thirds), que depende de um registro de
+  participantes ainda não implementado.
+- Corrigido também: `ffmpeg` do Homebrew (formula padrão) não tinha
+  suporte a desenhar texto (`drawtext`) — documentado como trocar para o
+  `ffmpeg-full`, que resolve isso sem mudar nada no projeto.
+
 ## v0.7.0 — 2026-08-15
 
 - **Renderização do vídeo final**: novo comando `render` transforma um

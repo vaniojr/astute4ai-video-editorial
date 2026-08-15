@@ -7,7 +7,7 @@ import pytest
 from app import ffmpeg_utils as ffmpeg_utils_module
 from app.brands import Brand, BrandAssets, BrandColors, BrandFeatures, BrandThumbnailConfig, BrandVideoConfig
 from app.config import Settings
-from app.editorial_models import Cta, EditorialPlan, Intro, SourceAttribution
+from app.editorial_models import ContextCard, Cta, EditorialPlan, Intro, SourceAttribution
 from app.editorial_renderer import EditorialRenderError, _wrap_text, render_editorial_video
 
 
@@ -32,6 +32,8 @@ def _settings(tmp_path):
         editorial_temperature=0.0,
         editorial_intro_seconds=10.0,
         editorial_cta_seconds=5.0,
+        editorial_card_seconds=4.0,
+        editorial_source_attribution_seconds=4.0,
     )
 
 
@@ -54,16 +56,23 @@ def _brand(tmp_path, *, with_font=True):
     )
 
 
-def _plan(*, intro_mode="text_only", intro_text="Intro de teste", cta_enabled=True):
+def _plan(
+    *,
+    intro_mode="text_only",
+    intro_text="Intro de teste",
+    cta_enabled=True,
+    source_attribution_text="Fonte original: Teste",
+    context_cards=None,
+):
     return EditorialPlan(
         chapter="8",
         cut_file="008_cap08_teste.mp4",
         brand="bussola-politica",
         version=1,
         intro=Intro(mode=intro_mode, text=intro_text if intro_mode == "text_only" else None),
-        source_attribution=SourceAttribution(text="Fonte original: Teste"),
+        source_attribution=SourceAttribution(text=source_attribution_text),
         lower_thirds=[],
-        context_cards=[],
+        context_cards=context_cards or [],
         highlights=[],
         cta=Cta(enabled=cta_enabled, text="TEXTO CTA" if cta_enabled else None),
         provider="claude",
@@ -114,18 +123,20 @@ def test_render_raises_when_ffmpeg_missing(tmp_path, monkeypatch):
     assert "FFmpeg" in str(exc_info.value)
 
 
-def test_render_copies_cut_directly_when_intro_and_cta_disabled(tmp_path, monkeypatch):
+def test_render_copies_cut_directly_when_nothing_to_overlay(tmp_path, monkeypatch):
     captured = []
     _fake_subprocess(monkeypatch, captured_cmds=captured)
     settings = _settings(tmp_path)
     cut_path = _make_cut_file(tmp_path)
     output_path = tmp_path / "final" / "out.mp4"
 
-    plan = _plan(intro_mode="disabled", cta_enabled=False)
+    plan = _plan(intro_mode="disabled", cta_enabled=False, source_attribution_text="")
     result = render_editorial_video(plan, cut_path, _brand(tmp_path), output_path, settings)
 
     assert result.intro_included is False
     assert result.cta_included is False
+    assert result.cards_included == 0
+    assert result.source_attribution_included is False
     assert output_path.read_bytes() == cut_path.read_bytes()
     assert not any(cmd[0] == "ffmpeg" for cmd in captured)
 
@@ -158,6 +169,7 @@ def test_render_includes_intro_and_cta_when_font_available(tmp_path, monkeypatch
 
     assert result.intro_included is True
     assert result.cta_included is True
+    assert result.source_attribution_included is True
     assert result.skipped_text_reason is None
     assert output_path.exists()
 
@@ -183,6 +195,93 @@ def test_render_includes_only_intro_when_cta_disabled(tmp_path, monkeypatch):
     assert result.cta_included is False
     ffmpeg_cmds = [cmd for cmd in captured if cmd[0] == "ffmpeg"]
     assert "concat=n=2:v=1:a=1" in " ".join(ffmpeg_cmds[0])
+
+
+def test_render_includes_cards_as_overlay_not_extra_segment(tmp_path, monkeypatch):
+    captured = []
+    _fake_subprocess(monkeypatch, captured_cmds=captured)
+    settings = _settings(tmp_path)
+    cut_path = _make_cut_file(tmp_path)
+    output_path = tmp_path / "final" / "out.mp4"
+
+    cards = [
+        ContextCard(kind="context", text="CONTEXTO", timestamp=5.0),
+        ContextCard(kind="subtopic", text="SUBTEMA", timestamp=10.0),
+    ]
+    plan = _plan(intro_mode="disabled", cta_enabled=False, source_attribution_text="", context_cards=cards)
+    result = render_editorial_video(plan, cut_path, _brand(tmp_path), output_path, settings)
+
+    assert result.cards_included == 2
+    ffmpeg_cmds = [cmd for cmd in captured if cmd[0] == "ffmpeg"]
+    cmd_str = " ".join(ffmpeg_cmds[0])
+    # Cards são overlay no próprio corte, não um segmento novo concatenado.
+    assert "concat=n=1:v=1:a=1" in cmd_str
+    assert cmd_str.count("drawtext") == 2
+    assert "between(t,5.0,9.0)" in cmd_str
+    assert "between(t,10.0,14.0)" in cmd_str
+
+
+def test_render_caps_at_configured_card_duration(tmp_path, monkeypatch):
+    captured = []
+    _fake_subprocess(monkeypatch, captured_cmds=captured)
+    settings = _settings(tmp_path)
+    cut_path = _make_cut_file(tmp_path)
+    output_path = tmp_path / "final" / "out.mp4"
+
+    cards = [ContextCard(kind="context", text="CONTEXTO", timestamp=0.0)]
+    plan = _plan(intro_mode="disabled", cta_enabled=False, source_attribution_text="", context_cards=cards)
+    render_editorial_video(plan, cut_path, _brand(tmp_path), output_path, settings)
+
+    ffmpeg_cmds = [cmd for cmd in captured if cmd[0] == "ffmpeg"]
+    assert "between(t,0.0,4.0)" in " ".join(ffmpeg_cmds[0])
+
+
+def test_render_includes_source_attribution_overlay(tmp_path, monkeypatch):
+    captured = []
+    _fake_subprocess(monkeypatch, captured_cmds=captured)
+    settings = _settings(tmp_path)
+    cut_path = _make_cut_file(tmp_path)
+    output_path = tmp_path / "final" / "out.mp4"
+
+    plan = _plan(intro_mode="disabled", cta_enabled=False, source_attribution_text="Fonte original: Teste")
+    result = render_editorial_video(plan, cut_path, _brand(tmp_path), output_path, settings)
+
+    assert result.source_attribution_included is True
+    ffmpeg_cmds = [cmd for cmd in captured if cmd[0] == "ffmpeg"]
+    cmd_str = " ".join(ffmpeg_cmds[0])
+    assert "concat=n=1:v=1:a=1" in cmd_str
+    assert "shadowcolor" in cmd_str
+    assert "between(t,0,4.0)" in cmd_str
+
+
+def test_render_skips_cards_and_source_attribution_without_font(tmp_path, monkeypatch):
+    _fake_subprocess(monkeypatch)
+    settings = _settings(tmp_path)
+    cut_path = _make_cut_file(tmp_path)
+    output_path = tmp_path / "final" / "out.mp4"
+
+    cards = [ContextCard(kind="context", text="CONTEXTO", timestamp=5.0)]
+    plan = _plan(intro_mode="disabled", cta_enabled=False, context_cards=cards)
+    result = render_editorial_video(plan, cut_path, _brand(tmp_path, with_font=False), output_path, settings)
+
+    assert result.cards_included == 0
+    assert result.source_attribution_included is False
+    assert "cards/atribuição" in result.skipped_text_reason
+
+
+def test_render_ignores_cards_with_blank_text(tmp_path, monkeypatch):
+    captured = []
+    _fake_subprocess(monkeypatch, captured_cmds=captured)
+    settings = _settings(tmp_path)
+    cut_path = _make_cut_file(tmp_path)
+    output_path = tmp_path / "final" / "out.mp4"
+
+    cards = [ContextCard(kind="context", text="   ", timestamp=5.0)]
+    plan = _plan(intro_mode="disabled", cta_enabled=False, source_attribution_text="", context_cards=cards)
+    result = render_editorial_video(plan, cut_path, _brand(tmp_path), output_path, settings)
+
+    assert result.cards_included == 0
+    assert not any(cmd[0] == "ffmpeg" for cmd in captured)
 
 
 def test_render_raises_on_ffmpeg_failure(tmp_path, monkeypatch):

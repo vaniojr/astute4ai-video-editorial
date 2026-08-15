@@ -8,6 +8,37 @@ correspondente (`git show <hash>`) ou o `docs/PRD_Video_Editorial*.md` da
 época. Para um resumo por versão (menos técnico), veja
 [RELEASE_NOTES.md](RELEASE_NOTES.md).
 
+## 2026-08-15 — Entrega 8.3: Editorial — Cards de contexto/subtema e atribuição de fonte
+
+- `render` agora desenha, **sobre o próprio corte** (não como segmento
+  concatenado), os cards de contexto/subtema e a atribuição de fonte já
+  previstos no plano editorial desde a 8.1 — `drawtext` encadeado no
+  stream de vídeo do corte, com `enable='between(t,início,fim)'`
+  controlando quando cada um aparece. Os timestamps dos cards já saem em
+  segundos relativos ao corte (calculados na 8.1); usados direto aqui,
+  sem conversão nem intervenção da IA.
+- Cards aparecem no terço inferior com caixa semitransparente (cor de
+  fundo da marca) atrás do texto, para legibilidade sobre imagem real;
+  atribuição de fonte no canto inferior direito, menor, com sombra em
+  vez de caixa (mais discreta). Ambos exigem a mesma
+  `brand.assets.primary_font` já usada por intro/CTA — sem fonte, tudo é
+  pulado junto (uma mensagem só, não uma por recurso).
+- Cap defensivo de no máximo 4 cards renderizados por corte (mesmo
+  limite já pedido no prompt do `editorialize`), aplicado em
+  `app/editorial_planner.py::build_editorial_plan()` — proteção contra o
+  modelo devolver mais cards do que deveria.
+- **Lower thirds continuam fora de escopo**: o dado nunca é preenchido
+  (sem registro de participantes desde a 8.0/9.1), não haveria nada para
+  renderizar — não construído um caminho de código morto.
+- `RenderResult` ganha `cards_included`/`source_attribution_included`;
+  `render --dry-run` e a saída real do comando mostram essas contagens.
+- Validado manualmente com FFmpeg real (`ffmpeg-full`, já configurado):
+  vídeo sintético de 28s com 2 cards em timestamps diferentes + atribuição
+  de fonte — duração final exata (43s = intro 10s + corte 28s + CTA 5s),
+  frames extraídos nos instantes certos confirmam visualmente que cada
+  overlay aparece só na janela de tempo correta e nenhum aparece fora
+  dela.
+
 ## 2026-08-15 — Ambiente: FFmpeg com suporte a `drawtext` + correção de quebra de linha
 
 - Resolvida a limitação apontada na entrega anterior: o `ffmpeg` do

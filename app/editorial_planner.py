@@ -19,6 +19,10 @@ from app.project import Project
 from app.timestamps import format_hms, to_relative_seconds
 from app.transcriber import TranscriptSegment
 
+# Cap defensivo contra o modelo devolver mais cards do que o prompt pede
+# (Feature_Editorializacao_Automatica.md seção 12: "0 a 4 cards por corte").
+_MAX_CONTEXT_CARDS = 4
+
 
 def extract_transcript_excerpt(
     transcricao_json_path: Path, start_seconds: float, end_seconds: float
@@ -99,7 +103,7 @@ def build_editorial_plan(
         source_text = f"{source_text} ({project.channel})"
 
     context_cards = []
-    for raw_card in candidate.context_cards:
+    for raw_card in candidate.context_cards[:_MAX_CONTEXT_CARDS]:
         fraction = min(max(raw_card.position_fraction, 0.0), 1.0)
         timestamp = round(fraction * cut_duration_seconds, 2)
         context_cards.append(ContextCard(kind=raw_card.kind, text=raw_card.text, timestamp=timestamp))

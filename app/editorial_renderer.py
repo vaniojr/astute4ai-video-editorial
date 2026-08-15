@@ -1,15 +1,25 @@
-"""Renderização do vídeo final (intro + corte + CTA) via FFmpeg.
+"""Renderização do vídeo final (intro + corte com overlays + CTA) via FFmpeg.
 
 Composição por filtro `concat` (não o demuxer `-f concat`) — robusto a
 pequenas diferenças de parâmetro de encoding entre a intro/CTA (geradas na
 hora) e o corte (já codificado por `app/cutter.py`), porque opera sobre
 frames decodificados, não sobre bitstream.
 
-Intro/CTA em texto exigem `brand.assets.primary_font` configurado — sem
-fonte, são simplesmente pulados (aviso claro no resultado), nunca falham
-o render inteiro: o corte sozinho já é um `final/*.mp4` válido (mesmo
-princípio do modo `manual` da thumbnail — nunca travar o pipeline por um
-recurso opcional em falta).
+Cards de contexto/subtema e a atribuição de fonte são desenhados **sobre**
+o próprio corte (não são segmentos concatenados) — `drawtext` encadeado no
+stream de vídeo do corte, com `enable='between(t,inicio,fim)'` controlando
+quando cada um aparece. Os timestamps dos cards já saem em segundos
+relativos ao corte desde `app/editorial_planner.py`, usados direto aqui
+sem conversão (a IA nunca decide esse valor — seção 34 do documento de
+referência). Lower thirds não são renderizados ainda: o dado nunca é
+preenchido (sem registro de participantes), não há nada a desenhar.
+
+Intro/CTA/cards/atribuição de fonte em texto exigem
+`brand.assets.primary_font` configurado — sem fonte, todos são
+simplesmente pulados (aviso claro no resultado), nunca falham o render
+inteiro: o corte sozinho já é um `final/*.mp4` válido (mesmo princípio do
+modo `manual` da thumbnail — nunca travar o pipeline por um recurso
+opcional em falta).
 """
 
 import shutil
@@ -21,11 +31,12 @@ from typing import List, Optional, Tuple
 
 from app.brands import Brand
 from app.config import Settings
-from app.editorial_models import EditorialPlan
+from app.editorial_models import ContextCard, EditorialPlan
 from app.ffmpeg_utils import INSTALL_HINT as FFMPEG_INSTALL_HINT
 from app.ffmpeg_utils import VideoProperties, is_binary_available, probe_video_properties, run, truncate_stderr
 
 _WRAP_CHARS = 40
+_CARD_WRAP_CHARS = 30
 
 
 class EditorialRenderError(Exception):
@@ -37,6 +48,8 @@ class RenderResult:
     output_path: Path
     intro_included: bool
     cta_included: bool
+    cards_included: int = 0
+    source_attribution_included: bool = False
     skipped_text_reason: Optional[str] = None
 
 
@@ -60,19 +73,23 @@ def render_editorial_video(
 
     want_intro = editorial_plan.intro.mode == "text_only" and bool((editorial_plan.intro.text or "").strip())
     want_cta = editorial_plan.cta.enabled and bool((editorial_plan.cta.text or "").strip())
+    cards = [c for c in editorial_plan.context_cards if (c.text or "").strip()]
+    want_source_attribution = bool((editorial_plan.source_attribution.text or "").strip())
 
     skipped_reason = None
-    if (want_intro or want_cta) and not font_available:
+    if (want_intro or want_cta or cards or want_source_attribution) and not font_available:
         skipped_reason = (
             f"Marca '{brand.slug}' não tem uma fonte configurada "
-            "(brand.assets.primary_font) — intro/CTA em texto foram pulados."
+            "(brand.assets.primary_font) — intro/CTA/cards/atribuição de fonte em texto foram pulados."
         )
         want_intro = False
         want_cta = False
+        cards = []
+        want_source_attribution = False
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    if not want_intro and not want_cta:
+    if not want_intro and not want_cta and not cards and not want_source_attribution:
         shutil.copyfile(cut_path, output_path)
         return RenderResult(
             output_path=output_path, intro_included=False, cta_included=False, skipped_text_reason=skipped_reason
@@ -91,6 +108,8 @@ def render_editorial_video(
             work_dir=work_dir,
             want_intro=want_intro,
             want_cta=want_cta,
+            cards=cards,
+            want_source_attribution=want_source_attribution,
         )
         result = run(cmd)
         if result.returncode != 0:
@@ -99,7 +118,12 @@ def render_editorial_video(
             )
 
     return RenderResult(
-        output_path=output_path, intro_included=want_intro, cta_included=want_cta, skipped_text_reason=skipped_reason
+        output_path=output_path,
+        intro_included=want_intro,
+        cta_included=want_cta,
+        cards_included=len(cards),
+        source_attribution_included=want_source_attribution,
+        skipped_text_reason=skipped_reason,
     )
 
 
@@ -115,6 +139,8 @@ def _build_render_command(
     work_dir: Path,
     want_intro: bool,
     want_cta: bool,
+    cards: List[ContextCard],
+    want_source_attribution: bool,
 ) -> List[str]:
     argv: List[str] = ["ffmpeg", "-y"]
     filter_lines: List[str] = []
@@ -144,7 +170,18 @@ def _build_render_command(
         )
 
     argv += ["-i", str(cut_path)]
-    filter_lines.append(f"[{input_index}:v]format=yuv420p[cut_v]")
+    cut_video_filter = _build_cut_overlay_chain(
+        editorial_plan,
+        cards=cards,
+        want_source_attribution=want_source_attribution,
+        font_path=font_path,
+        text_color=text_color,
+        bg_color=bg_color,
+        fontsize=fontsize,
+        settings=settings,
+        work_dir=work_dir,
+    )
+    filter_lines.append(f"[{input_index}:v]{cut_video_filter}format=yuv420p[cut_v]")
     filter_lines.append(
         f"[{input_index}:a]aformat=sample_rates={props.sample_rate}:channel_layouts=stereo[cut_a]"
     )
@@ -196,6 +233,58 @@ def _build_render_command(
     return argv
 
 
+def _build_cut_overlay_chain(
+    editorial_plan: EditorialPlan,
+    *,
+    cards: List[ContextCard],
+    want_source_attribution: bool,
+    font_path: Optional[Path],
+    text_color: str,
+    bg_color: str,
+    fontsize: int,
+    settings: Settings,
+    work_dir: Path,
+) -> str:
+    """Cadeia de `drawtext,` (com vírgula final) a aplicar sobre o corte, na ordem.
+
+    Cada card/atribuição de fonte é um estágio `drawtext` adicional com
+    `enable='between(t,inicio,fim)'` — sobre o próprio stream do corte, não
+    um segmento novo. Retorna string vazia se nada for aplicado.
+    """
+    stages: List[str] = []
+    card_fontsize = max(18, int(fontsize * 0.7))
+
+    for index, card in enumerate(cards, start=1):
+        text_path = work_dir / f"card_{index:02d}.txt"
+        text_path.write_text(_wrap_text(card.text, width=_CARD_WRAP_CHARS), encoding="utf-8")
+        start = max(card.timestamp, 0.0)
+        end = start + settings.editorial_card_seconds
+        stages.append(
+            f"drawtext=fontfile={_escape_filter_value(str(font_path))}:"
+            f"textfile={_escape_filter_value(str(text_path))}:fontsize={card_fontsize}:"
+            f"fontcolor={text_color}:x=(w-text_w)/2:y=h-text_h-40:"
+            f"box=1:boxcolor={bg_color}@0.7:boxborderw=10:line_spacing=6:"
+            f"enable='between(t,{start},{end})'"
+        )
+
+    if want_source_attribution:
+        text_path = work_dir / "source_attribution.txt"
+        text_path.write_text(
+            _wrap_text(editorial_plan.source_attribution.text, width=_CARD_WRAP_CHARS), encoding="utf-8"
+        )
+        duration = settings.editorial_source_attribution_seconds
+        attribution_fontsize = max(14, int(fontsize * 0.5))
+        stages.append(
+            f"drawtext=fontfile={_escape_filter_value(str(font_path))}:"
+            f"textfile={_escape_filter_value(str(text_path))}:fontsize={attribution_fontsize}:"
+            f"fontcolor={text_color}:x=w-text_w-20:y=h-text_h-20:"
+            f"shadowcolor=black@0.8:shadowx=2:shadowy=2:"
+            f"enable='between(t,0,{duration})'"
+        )
+
+    return "".join(f"{stage}," for stage in stages)
+
+
 def _append_text_card_inputs(
     argv: List[str],
     filter_lines: List[str],
@@ -235,7 +324,7 @@ def _append_text_card_inputs(
     return input_index
 
 
-def _wrap_text(text: str) -> str:
+def _wrap_text(text: str, *, width: int = _WRAP_CHARS) -> str:
     """Quebra linhas longas por largura, preservando quebras de linha já existentes.
 
     `textwrap.wrap()` sozinho colapsa `\\n` já presentes no texto (ex.:
@@ -245,7 +334,7 @@ def _wrap_text(text: str) -> str:
     lines = []
     for paragraph in text.split("\n"):
         if paragraph.strip():
-            lines.extend(textwrap.wrap(paragraph, width=_WRAP_CHARS))
+            lines.extend(textwrap.wrap(paragraph, width=width))
         else:
             lines.append("")
     return "\n".join(lines) if lines else text

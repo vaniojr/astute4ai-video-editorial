@@ -24,6 +24,8 @@ def test_load_settings_defaults(monkeypatch):
         "VIDEO_EDITORIAL_EDITORIAL_TEMPERATURE",
         "VIDEO_EDITORIAL_EDITORIAL_INTRO_SECONDS",
         "VIDEO_EDITORIAL_EDITORIAL_CTA_SECONDS",
+        "VIDEO_EDITORIAL_EDITORIAL_CARD_SECONDS",
+        "VIDEO_EDITORIAL_EDITORIAL_SOURCE_ATTRIBUTION_SECONDS",
     ):
         monkeypatch.delenv(var, raising=False)
 
@@ -48,6 +50,8 @@ def test_load_settings_defaults(monkeypatch):
     assert settings.editorial_temperature == 0.0
     assert settings.editorial_intro_seconds == 10.0
     assert settings.editorial_cta_seconds == 5.0
+    assert settings.editorial_card_seconds == 4.0
+    assert settings.editorial_source_attribution_seconds == 4.0
 
 
 def test_load_settings_reads_env_var_overrides(monkeypatch, tmp_path):
@@ -70,6 +74,8 @@ def test_load_settings_reads_env_var_overrides(monkeypatch, tmp_path):
     monkeypatch.setenv("VIDEO_EDITORIAL_EDITORIAL_TEMPERATURE", "0.3")
     monkeypatch.setenv("VIDEO_EDITORIAL_EDITORIAL_INTRO_SECONDS", "12")
     monkeypatch.setenv("VIDEO_EDITORIAL_EDITORIAL_CTA_SECONDS", "6")
+    monkeypatch.setenv("VIDEO_EDITORIAL_EDITORIAL_CARD_SECONDS", "3")
+    monkeypatch.setenv("VIDEO_EDITORIAL_EDITORIAL_SOURCE_ATTRIBUTION_SECONDS", "2")
 
     settings = load_settings()
 
@@ -92,3 +98,5 @@ def test_load_settings_reads_env_var_overrides(monkeypatch, tmp_path):
     assert settings.editorial_temperature == 0.3
     assert settings.editorial_intro_seconds == 12.0
     assert settings.editorial_cta_seconds == 6.0
+    assert settings.editorial_card_seconds == 3.0
+    assert settings.editorial_source_attribution_seconds == 2.0
