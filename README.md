@@ -7,7 +7,9 @@ Status atual: pipeline completo da Fase 1 do PRD (`init`, `download`,
 `audio`, `transcribe`, `cut`, `status`) mais a automação da análise
 editorial via LLM (`analyze`, Fase A — ver
 `PRD_Video_Editorial_plus_analyses.md`). Veja
-[docs/PIPELINE.md](docs/PIPELINE.md) para o passo a passo de ponta a ponta.
+[docs/PIPELINE.md](docs/PIPELINE.md) para o passo a passo de ponta a ponta
+e [docs/CHANGELOG.md](docs/CHANGELOG.md) para o histórico do que foi
+entregue em cada etapa.
 
 ## Setup
 
