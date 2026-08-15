@@ -40,6 +40,53 @@ class ProjectCreationResult:
     project: Optional[Project]
 
 
+class ProjectNotFoundError(Exception):
+    """Erro acionável quando o argumento PROJECT não corresponde a um projeto."""
+
+
+def resolve_project_dir(project_arg: str, settings: Settings) -> Path:
+    """Resolve PROJECT para um diretório de projeto existente.
+
+    Aceita o nome do diretório dentro de `projetos/` ou um caminho explícito
+    (relativo, absoluto ou `.`). Resolução por source_id/slug fica para uma
+    entrega futura (PRD seção 25).
+    """
+    candidates = (Path(project_arg), settings.projetos_dir / project_arg)
+    for candidate in candidates:
+        if (candidate / "project.json").is_file():
+            return candidate
+
+    raise ProjectNotFoundError(
+        f"Projeto não encontrado: {project_arg}\n\n"
+        f"Verifique se o diretório existe em '{settings.projetos_dir}' "
+        "ou informe o caminho completo do projeto."
+    )
+
+
+def load_project(project_dir: Path) -> Project:
+    data = json.loads((project_dir / "project.json").read_text(encoding="utf-8"))
+    return Project(
+        schema_version=data["schema_version"],
+        platform=data["platform"],
+        source_id=data["source_id"],
+        source_url=data["source_url"],
+        title=data["title"],
+        channel=data.get("channel"),
+        published_at=date.fromisoformat(data["published_at"]) if data.get("published_at") else None,
+        duration_seconds=data.get("duration_seconds"),
+        slug=data["slug"],
+        created_at=datetime.fromisoformat(data["created_at"]),
+        status=data["status"],
+    )
+
+
+def update_status(project_dir: Path, status: str) -> None:
+    path = project_dir / "project.json"
+    data = json.loads(path.read_text(encoding="utf-8"))
+    data["status"] = status
+    path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
 def find_existing_project(source_id: str, projetos_dir: Path) -> Optional[Path]:
     if not projetos_dir.exists():
         return None

@@ -4,7 +4,15 @@ from datetime import date
 from app import project as project_module
 from app.config import Settings
 from app.metadata import VideoMetadata
-from app.project import _write_fonte_md, create_project, find_existing_project
+from app.project import (
+    ProjectNotFoundError,
+    _write_fonte_md,
+    create_project,
+    find_existing_project,
+    load_project,
+    resolve_project_dir,
+    update_status,
+)
 
 
 def _settings(tmp_path):
@@ -16,6 +24,7 @@ def _settings(tmp_path):
         ffmpeg_preset="medium",
         audio_bitrate_kbps=192,
         output_format="mp4",
+        max_video_height=None,
     )
 
 
@@ -119,3 +128,59 @@ def test_write_fonte_md_does_not_overwrite_existing_file(tmp_path, monkeypatch):
 
 def test_find_existing_project_returns_none_when_directory_absent(tmp_path):
     assert find_existing_project("abc123", tmp_path / "projetos") is None
+
+
+def test_load_project_reconstructs_project(tmp_path, monkeypatch):
+    settings = _settings(tmp_path)
+    monkeypatch.setattr(project_module, "fetch_metadata", lambda url: _fake_metadata())
+    result = create_project("https://www.youtube.com/watch?v=7xgE4ZHNWRU", settings)
+
+    loaded = load_project(result.path)
+
+    assert loaded.source_id == "7xgE4ZHNWRU"
+    assert loaded.source_url == "https://www.youtube.com/watch?v=7xgE4ZHNWRU"
+    assert loaded.published_at == date(2026, 8, 12)
+    assert loaded.status == "created"
+
+
+def test_update_status_changes_only_status_field(tmp_path, monkeypatch):
+    settings = _settings(tmp_path)
+    monkeypatch.setattr(project_module, "fetch_metadata", lambda url: _fake_metadata())
+    result = create_project("https://www.youtube.com/watch?v=7xgE4ZHNWRU", settings)
+
+    update_status(result.path, "downloaded")
+
+    data = json.loads((result.path / "project.json").read_text(encoding="utf-8"))
+    assert data["status"] == "downloaded"
+    assert data["source_id"] == "7xgE4ZHNWRU"
+    assert data["title"] == "Podcast 3 Irmãos #1033"
+
+
+def test_resolve_project_dir_by_directory_name(tmp_path, monkeypatch):
+    settings = _settings(tmp_path)
+    monkeypatch.setattr(project_module, "fetch_metadata", lambda url: _fake_metadata())
+    result = create_project("https://www.youtube.com/watch?v=7xgE4ZHNWRU", settings)
+
+    resolved = resolve_project_dir(result.path.name, settings)
+
+    assert resolved == result.path
+
+
+def test_resolve_project_dir_by_explicit_path(tmp_path, monkeypatch):
+    settings = _settings(tmp_path)
+    monkeypatch.setattr(project_module, "fetch_metadata", lambda url: _fake_metadata())
+    result = create_project("https://www.youtube.com/watch?v=7xgE4ZHNWRU", settings)
+
+    resolved = resolve_project_dir(str(result.path), settings)
+
+    assert resolved == result.path
+
+
+def test_resolve_project_dir_raises_when_not_found(tmp_path):
+    settings = _settings(tmp_path)
+
+    try:
+        resolve_project_dir("nao-existe", settings)
+        assert False, "deveria ter levantado ProjectNotFoundError"
+    except ProjectNotFoundError:
+        pass

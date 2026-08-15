@@ -2,8 +2,10 @@
 
 import typer
 
+from app.config import load_settings
+from app.downloader import DownloadError, download_video
 from app.metadata import MetadataError
-from app.project import create_project
+from app.project import ProjectNotFoundError, create_project, load_project, resolve_project_dir, update_status
 
 app = typer.Typer(help="Ferramenta local para produção editorial de vídeos.")
 
@@ -36,6 +38,37 @@ def init(url: str = typer.Argument(..., help="URL do vídeo de origem (ex.: YouT
     typer.echo(f"Canal: {project.channel or '(não detectado)'}")
     if project.duration_seconds is not None:
         typer.echo(f"Duração: {project.duration_seconds} segundos")
+
+
+@app.command()
+def download(
+    project: str = typer.Argument(..., help="Nome do diretório em projetos/ ou caminho do projeto."),
+    force: bool = typer.Option(False, "--force", help="Forçar novo download mesmo se o arquivo já existir."),
+) -> None:
+    """Baixa o vídeo original de um projeto já criado."""
+    settings = load_settings()
+    try:
+        project_dir = resolve_project_dir(project, settings)
+    except ProjectNotFoundError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1)
+
+    proj = load_project(project_dir)
+
+    try:
+        result = download_video(project_dir, proj.source_url, settings, force=force)
+    except DownloadError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1)
+
+    if result.skipped:
+        typer.echo("Arquivo original já existe.")
+        typer.echo("Nenhum download realizado.")
+        return
+
+    update_status(project_dir, "downloaded")
+    typer.echo("Download concluído:\n")
+    typer.echo(str(result.path))
 
 
 if __name__ == "__main__":

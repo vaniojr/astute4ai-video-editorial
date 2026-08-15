@@ -1,9 +1,12 @@
+import json
 from datetime import date
 
 from typer.testing import CliRunner
 
 from app import project as project_module
+from app.downloader import DownloadError, DownloadResult
 from app.metadata import MetadataError, VideoMetadata
+from cli import main as cli_main
 from cli.main import app
 
 runner = CliRunner()
@@ -57,5 +60,70 @@ def test_init_reports_metadata_errors(tmp_path, monkeypatch):
     monkeypatch.setattr(project_module, "fetch_metadata", _raise)
 
     result = runner.invoke(app, ["init", "https://www.youtube.com/watch?v=invalid"])
+
+    assert result.exit_code == 1
+
+
+def _create_project(tmp_path, monkeypatch):
+    projetos_dir = tmp_path / "projetos"
+    monkeypatch.setenv("VIDEO_EDITORIAL_PROJETOS_DIR", str(projetos_dir))
+    monkeypatch.setattr(project_module, "fetch_metadata", lambda url: _fake_metadata())
+    runner.invoke(app, ["init", "https://www.youtube.com/watch?v=7xgE4ZHNWRU"])
+    return projetos_dir / "2026-08-12_podcast-3-irmaos-1033_7xgE4ZHNWRU"
+
+
+def test_download_creates_file_and_updates_status(tmp_path, monkeypatch):
+    project_dir = _create_project(tmp_path, monkeypatch)
+
+    def _fake_download(pdir, url, settings, force=False):
+        final = pdir / "original" / "video-original.mp4"
+        final.write_bytes(b"fake video bytes")
+        return DownloadResult(path=final, skipped=False)
+
+    monkeypatch.setattr(cli_main, "download_video", _fake_download)
+
+    result = runner.invoke(app, ["download", str(project_dir)])
+
+    assert result.exit_code == 0
+    assert "Download concluído" in result.stdout
+    data = json.loads((project_dir / "project.json").read_text(encoding="utf-8"))
+    assert data["status"] == "downloaded"
+
+
+def test_download_reports_existing_file_without_changing_status(tmp_path, monkeypatch):
+    project_dir = _create_project(tmp_path, monkeypatch)
+
+    def _fake_download(pdir, url, settings, force=False):
+        final = pdir / "original" / "video-original.mp4"
+        return DownloadResult(path=final, skipped=True)
+
+    monkeypatch.setattr(cli_main, "download_video", _fake_download)
+
+    result = runner.invoke(app, ["download", str(project_dir)])
+
+    assert result.exit_code == 0
+    assert "Arquivo original já existe." in result.stdout
+    assert "Nenhum download realizado." in result.stdout
+    data = json.loads((project_dir / "project.json").read_text(encoding="utf-8"))
+    assert data["status"] == "created"
+
+
+def test_download_reports_download_errors(tmp_path, monkeypatch):
+    project_dir = _create_project(tmp_path, monkeypatch)
+
+    def _raise(pdir, url, settings, force=False):
+        raise DownloadError("mensagem acionável")
+
+    monkeypatch.setattr(cli_main, "download_video", _raise)
+
+    result = runner.invoke(app, ["download", str(project_dir)])
+
+    assert result.exit_code == 1
+
+
+def test_download_reports_project_not_found(tmp_path, monkeypatch):
+    monkeypatch.setenv("VIDEO_EDITORIAL_PROJETOS_DIR", str(tmp_path / "projetos"))
+
+    result = runner.invoke(app, ["download", "nao-existe"])
 
     assert result.exit_code == 1
