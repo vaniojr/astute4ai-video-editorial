@@ -3,9 +3,10 @@
 Ferramenta local para apoiar a produção editorial de vídeos longos, podcasts
 e lives. Veja `PRD_Video_Editorial.md` para a visão completa do produto.
 
-Status atual: **Entrega 7 — Refinamento**. O pipeline completo da Fase 1 do
-PRD está implementado: `init`, `download`, `audio`, `transcribe`, `cut`
-(dry-run e geração real) e `status`. Veja
+Status atual: pipeline completo da Fase 1 do PRD (`init`, `download`,
+`audio`, `transcribe`, `cut`, `status`) mais a automação da análise
+editorial via LLM (`analyze`, Fase A — ver
+`PRD_Video_Editorial_plus_analyses.md`). Veja
 [docs/PIPELINE.md](docs/PIPELINE.md) para o passo a passo de ponta a ponta.
 
 ## Setup
@@ -15,6 +16,12 @@ Requer [uv](https://docs.astral.sh/uv/).
 ```bash
 uv sync
 ```
+
+Para usar `analyze` (análise editorial automática via Claude), copie
+`.env.example` para `.env` e preencha `ANTHROPIC_API_KEY` com sua chave da
+[API da Anthropic](https://console.anthropic.com/). `.env` nunca é
+versionado (já está no `.gitignore`); `.env.example` não tem segredo e pode
+ser commitado normalmente.
 
 ## Uso
 
@@ -72,15 +79,50 @@ requer conexão com a internet e pode demorar. O idioma padrão
 (`VIDEO_EDITORIAL_WHISPER_LANGUAGE`) é `pt`.
 
 ```bash
+uv run video-editorial analyze "projetos/2026-08-12_slug_ID"
+```
+
+Gera `03 Analise.csv` automaticamente, chamando a API da Claude com
+`01 Fonte.md` + `02 Transcricao.md` (requer `ANTHROPIC_API_KEY`, ver
+"Setup"). A resposta é sempre um resultado estruturado (nunca texto livre),
+validado e convertido para CSV pelo próprio código — a IA nunca decide
+sozinha se um timestamp é válido, e a duração de cada capítulo é sempre
+calculada pelo código, nunca aceita do modelo.
+
+- `--dry-run`: mostra provider/modelo/tamanho da transcrição/arquivo de
+  saída, **sem chamar a API**.
+- Pede confirmação antes de qualquer chamada real (tem custo) — use `--yes`
+  para pular (automação).
+- Idempotente: se `03 Analise.csv` já existe, não gera de novo — use
+  `--force`.
+- `--provider`/`--model` sobrescrevem a configuração padrão
+  (`VIDEO_EDITORIAL_ANALYSIS_PROVIDER`, padrão `claude`;
+  `VIDEO_EDITORIAL_ANALYSIS_MODEL`, padrão `claude-sonnet-5`). Só `claude`
+  está implementado por enquanto — a arquitetura (`AnalysisProvider`) já
+  permite adicionar outros no futuro sem mexer no restante do pipeline.
+- Transcrições muito longas (acima de ~100.000 caracteres) ainda são
+  enviadas numa única chamada — chunking para transcrições muito longas é
+  uma evolução futura (Fase B), o `analyze --dry-run` avisa quando isso se
+  aplica.
+- Logo depois de escrever o CSV, `analyze` já roda a mesma validação do
+  `cut --dry-run` e mostra o resultado — não precisa rodar os dois
+  separadamente para ver se algum capítulo ficou `[AMBÍGUO]`/`[ERRO]`.
+
+A **revisão humana continua obrigatória**: `analyze` só propõe o CSV, quem
+decide o que de fato vira corte é `cut --dry-run` + edição manual do CSV
+antes do `cut` de verdade. Se preferir não usar IA (ou a API estiver fora
+do ar), o fluxo manual continua funcionando normalmente — monte
+`03 Analise.csv` a partir de `01 Fonte.md`/`02 Transcricao.md`, copiando
+[templates/03_Analise_exemplo.csv](templates/03_Analise_exemplo.csv) como
+ponto de partida.
+
+```bash
 uv run video-editorial cut "projetos/2026-08-12_slug_ID" --dry-run
 ```
 
-A análise editorial (`03 Analise.csv`) ainda é produzida externamente
-(Claude no VS Code, a partir de `01 Fonte.md` e `02 Transcricao.md`) — não
-há geração automática nesta versão. Copie
-[templates/03_Analise_exemplo.csv](templates/03_Analise_exemplo.csv) como
-ponto de partida para não errar o cabeçalho. O `cut --dry-run` lê esse CSV,
-valida cada linha e mostra os cortes elegíveis, **sem gerar nenhum vídeo**.
+`cut --dry-run` lê `03 Analise.csv` (gerado por `analyze` ou editado à
+mão — `cut` nunca sabe nem precisa saber a origem), valida cada linha e
+mostra os cortes elegíveis, **sem gerar nenhum vídeo**.
 
 Colunas reconhecidas (nomes exatos, qualquer ordem):
 `Ordem Publicacao`, `Prioridade`, `Capitulo`, `Bloco Editorial`,

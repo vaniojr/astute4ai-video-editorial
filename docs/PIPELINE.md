@@ -1,7 +1,8 @@
 # Pipeline — da URL aos cortes
 
-Visão de ponta a ponta do fluxo local (Fase 1 do PRD). Para detalhes de
-cada comando (flags, formato de saída), veja o [README](../README.md).
+Visão de ponta a ponta do fluxo local (Fase 1 do PRD, mais a automação da
+análise editorial via LLM). Para detalhes de cada comando (flags, formato
+de saída), veja o [README](../README.md).
 
 ## 1. Criar o projeto
 
@@ -38,12 +39,28 @@ uv run video-editorial transcribe "projetos/YYYY-MM-DD_slug_ID"
 
 Gera `02 Transcricao.md` e `transcricao.json`, com timestamps preservados.
 
-## 5. Análise editorial (etapa manual)
+## 5. Análise editorial
 
-Esta etapa **não é automatizada** nesta versão (PRD seção 14). A partir de
-`01 Fonte.md` e `02 Transcricao.md`, monte `03 Analise.csv` no diretório do
-projeto — copie `templates/03_Analise_exemplo.csv` como ponto de partida
-para não errar o cabeçalho.
+```bash
+uv run video-editorial analyze "projetos/YYYY-MM-DD_slug_ID"
+```
+
+Gera `03 Analise.csv` automaticamente via API da Claude, a partir de
+`01 Fonte.md` + `02 Transcricao.md` (requer `ANTHROPIC_API_KEY` em `.env`
+— veja o README). Roda `--dry-run` primeiro se quiser ver o plano
+(provider, modelo, tamanho da transcrição) sem gastar nada; pede
+confirmação antes de qualquer chamada real, com custo.
+
+**Revisão humana continua obrigatória** — `analyze` só propõe o CSV, quem
+decide o que publicar é a revisão manual do arquivo antes do corte.
+
+### Alternativa: análise manual
+
+Se preferir não usar IA (ou a API estiver indisponível), monte
+`03 Analise.csv` você mesmo a partir de `01 Fonte.md`/`02 Transcricao.md`
+— copie `templates/03_Analise_exemplo.csv` como ponto de partida para não
+errar o cabeçalho. `cut` não sabe (nem precisa saber) se o CSV foi gerado
+por IA ou digitado à mão.
 
 ## 6. Validar (dry-run)
 

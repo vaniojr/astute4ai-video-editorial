@@ -15,6 +15,9 @@ def _settings(tmp_path, max_video_height=None):
         audio_bitrate_kbps=192,
         output_format="mp4",
         max_video_height=max_video_height,
+        analysis_provider="claude",
+        analysis_model="claude-sonnet-5",
+        analysis_temperature=0.0,
     )
 
 

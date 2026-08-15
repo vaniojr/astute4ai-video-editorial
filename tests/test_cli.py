@@ -5,6 +5,7 @@ from typer.testing import CliRunner
 
 from app import project as project_module
 from app.analysis import AnalysisError, AnalysisRow, ChapterReport, DryRunReport
+from app.analyzer import AnalysisPlan, AnalysisServiceError, AnalyzeResult
 from app.audio import AudioError, AudioResult
 from app.cutter import CutOutcome, CutRunResult, CutterError
 from app.downloader import DownloadError, DownloadResult
@@ -247,6 +248,141 @@ def test_transcribe_reports_project_not_found(tmp_path, monkeypatch):
     monkeypatch.setenv("VIDEO_EDITORIAL_PROJETOS_DIR", str(tmp_path / "projetos"))
 
     result = runner.invoke(app, ["transcribe", "nao-existe"])
+
+    assert result.exit_code == 1
+
+
+def _fake_plan(project_dir, **overrides):
+    defaults = dict(
+        project_dir=project_dir,
+        provider="claude",
+        model="claude-sonnet-5",
+        source_path=project_dir / "01 Fonte.md",
+        transcript_path=project_dir / "02 Transcricao.md",
+        transcript_char_count=1234,
+        csv_path=project_dir / "03 Analise.csv",
+        already_exists=False,
+        long_transcript_warning=None,
+    )
+    defaults.update(overrides)
+    return AnalysisPlan(**defaults)
+
+
+def test_analyze_dry_run_prints_plan_without_calling_service(tmp_path, monkeypatch):
+    project_dir = _create_project(tmp_path, monkeypatch)
+    plan = _fake_plan(project_dir)
+    monkeypatch.setattr(cli_main, "plan_analysis", lambda pdir, settings, provider=None, model=None: plan)
+
+    def _fail_if_called(*args, **kwargs):
+        raise AssertionError("analyze_project não deveria ser chamado em --dry-run")
+
+    monkeypatch.setattr(cli_main, "analyze_project", _fail_if_called)
+
+    result = runner.invoke(app, ["analyze", str(project_dir), "--dry-run"])
+
+    assert result.exit_code == 0
+    assert "DRY RUN" in result.stdout
+    assert "Nenhuma chamada de API realizada." in result.stdout
+    assert "1.234" in result.stdout
+
+
+def test_analyze_reports_existing_analysis_without_force(tmp_path, monkeypatch):
+    project_dir = _create_project(tmp_path, monkeypatch)
+    plan = _fake_plan(project_dir, already_exists=True)
+    monkeypatch.setattr(cli_main, "plan_analysis", lambda pdir, settings, provider=None, model=None: plan)
+
+    result = runner.invoke(app, ["analyze", str(project_dir), "--yes"])
+
+    assert result.exit_code == 0
+    assert "A análise já existe" in result.stdout
+
+
+def test_analyze_confirmation_prompt_cancels_without_yes(tmp_path, monkeypatch):
+    project_dir = _create_project(tmp_path, monkeypatch)
+    plan = _fake_plan(project_dir)
+    monkeypatch.setattr(cli_main, "plan_analysis", lambda pdir, settings, provider=None, model=None: plan)
+
+    def _fail_if_called(*args, **kwargs):
+        raise AssertionError("analyze_project não deveria ser chamado se o usuário cancelar")
+
+    monkeypatch.setattr(cli_main, "analyze_project", _fail_if_called)
+
+    result = runner.invoke(app, ["analyze", str(project_dir)], input="n\n")
+
+    assert result.exit_code == 0
+    assert "Cancelado" in result.stdout
+
+
+def test_analyze_yes_skips_confirmation_and_calls_service(tmp_path, monkeypatch):
+    project_dir = _create_project(tmp_path, monkeypatch)
+    plan = _fake_plan(project_dir)
+    monkeypatch.setattr(cli_main, "plan_analysis", lambda pdir, settings, provider=None, model=None: plan)
+
+    analyze_result = AnalyzeResult(plan=plan, skipped=False, dry_run_report=None, usage=None)
+    monkeypatch.setattr(
+        cli_main,
+        "analyze_project",
+        lambda pdir, settings, provider=None, model=None, force=False: analyze_result,
+    )
+
+    result = runner.invoke(app, ["analyze", str(project_dir), "--yes"])
+
+    assert result.exit_code == 0
+    assert "Análise concluída" in result.stdout
+
+
+def test_analyze_force_is_forwarded_to_service(tmp_path, monkeypatch):
+    project_dir = _create_project(tmp_path, monkeypatch)
+    plan = _fake_plan(project_dir, already_exists=True)
+    monkeypatch.setattr(cli_main, "plan_analysis", lambda pdir, settings, provider=None, model=None: plan)
+
+    analyze_result = AnalyzeResult(plan=plan, skipped=False, dry_run_report=None, usage=None)
+    captured = {}
+
+    def _fake_analyze(pdir, settings, provider=None, model=None, force=False):
+        captured["force"] = force
+        return analyze_result
+
+    monkeypatch.setattr(cli_main, "analyze_project", _fake_analyze)
+
+    result = runner.invoke(app, ["analyze", str(project_dir), "--yes", "--force"])
+
+    assert result.exit_code == 0
+    assert captured["force"] is True
+
+
+def test_analyze_reports_service_errors(tmp_path, monkeypatch):
+    project_dir = _create_project(tmp_path, monkeypatch)
+    plan = _fake_plan(project_dir)
+    monkeypatch.setattr(cli_main, "plan_analysis", lambda pdir, settings, provider=None, model=None: plan)
+
+    def _raise(pdir, settings, provider=None, model=None, force=False):
+        raise AnalysisServiceError("mensagem acionável")
+
+    monkeypatch.setattr(cli_main, "analyze_project", _raise)
+
+    result = runner.invoke(app, ["analyze", str(project_dir), "--yes"])
+
+    assert result.exit_code == 1
+
+
+def test_analyze_reports_plan_errors(tmp_path, monkeypatch):
+    project_dir = _create_project(tmp_path, monkeypatch)
+
+    def _raise(pdir, settings, provider=None, model=None):
+        raise AnalysisServiceError("02 Transcricao.md não encontrado")
+
+    monkeypatch.setattr(cli_main, "plan_analysis", _raise)
+
+    result = runner.invoke(app, ["analyze", str(project_dir), "--dry-run"])
+
+    assert result.exit_code == 1
+
+
+def test_analyze_reports_project_not_found(tmp_path, monkeypatch):
+    monkeypatch.setenv("VIDEO_EDITORIAL_PROJETOS_DIR", str(tmp_path / "projetos"))
+
+    result = runner.invoke(app, ["analyze", "nao-existe", "--dry-run"])
 
     assert result.exit_code == 1
 

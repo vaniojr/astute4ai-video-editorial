@@ -21,6 +21,9 @@ class Settings:
     audio_bitrate_kbps: int
     output_format: str
     max_video_height: Optional[int]
+    analysis_provider: str
+    analysis_model: str
+    analysis_temperature: float
 
 
 def load_settings() -> Settings:
@@ -34,4 +37,7 @@ def load_settings() -> Settings:
         audio_bitrate_kbps=int(os.environ.get("VIDEO_EDITORIAL_AUDIO_BITRATE_KBPS", "192")),
         output_format=os.environ.get("VIDEO_EDITORIAL_OUTPUT_FORMAT", "mp4"),
         max_video_height=int(max_video_height_raw) if max_video_height_raw else None,
+        analysis_provider=os.environ.get("VIDEO_EDITORIAL_ANALYSIS_PROVIDER", "claude"),
+        analysis_model=os.environ.get("VIDEO_EDITORIAL_ANALYSIS_MODEL", "claude-sonnet-5"),
+        analysis_temperature=float(os.environ.get("VIDEO_EDITORIAL_ANALYSIS_TEMPERATURE", "0")),
     )

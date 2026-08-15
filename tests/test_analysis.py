@@ -12,6 +12,7 @@ from app.analysis import (
     classify_action,
     filter_chapters,
     load_analysis,
+    write_analysis_csv,
 )
 
 _HEADERS = [
@@ -450,3 +451,41 @@ def test_filter_chapters_combines_filters_with_and():
 def test_filter_chapters_by_chapter_ignores_non_numeric_capitulo():
     chapters = [_chapter(capitulo="abc")]
     assert filter_chapters(chapters, chapter=8) == []
+
+
+def test_write_analysis_csv_round_trips_through_load_analysis(tmp_path):
+    csv_path = tmp_path / "03 Analise.csv"
+    rows = [
+        AnalysisRow(
+            ordem_publicacao="1",
+            prioridade="A",
+            capitulo="8",
+            acao_editorial="Manter",
+            timestamp_inicial="00:29:07",
+            timestamp_final="00:37:22",
+            duracao="00:08:15",
+            tema_principal='Tema com "aspas", vírgula e acentuação: é, ção',
+            titulo_sugerido="Título, com vírgula",
+            resumo="Linha 1\nLinha 2",
+            observacoes="",
+        ),
+    ]
+
+    write_analysis_csv(csv_path, rows)
+    loaded = load_analysis(csv_path)
+
+    assert len(loaded) == 1
+    assert loaded[0].tema_principal == 'Tema com "aspas", vírgula e acentuação: é, ção'
+    assert loaded[0].titulo_sugerido == "Título, com vírgula"
+    assert loaded[0].resumo == "Linha 1\nLinha 2"
+    assert loaded[0].timestamp_inicial == "00:29:07"
+
+
+def test_write_analysis_csv_uses_exact_header_order(tmp_path):
+    csv_path = tmp_path / "03 Analise.csv"
+    write_analysis_csv(csv_path, [AnalysisRow(ordem_publicacao="1", capitulo="1", acao_editorial="Manter")])
+
+    with csv_path.open("r", encoding="utf-8-sig", newline="") as fh:
+        header = next(csv.reader(fh))
+
+    assert header == _HEADERS

@@ -11,7 +11,7 @@ from app.config import Settings, load_settings
 from app.metadata import fetch_metadata
 from app.slug import slugify
 
-_PROJECT_SUBDIRS = ("original", "audio", "cortes", "thumbs", "publicados", "logs")
+_PROJECT_SUBDIRS = ("original", "audio", "cortes", "thumbs", "publicados", "logs", "analysis")
 
 # PRD seção 23 — ordem dos estágios do pipeline, usada por advance_status()
 # para nunca regredir um status já mais avançado.

@@ -1,9 +1,12 @@
-"""Leitura, validação e dry-run de `03 Analise.csv` (PRD seções 14–18).
+"""Leitura, escrita, validação e dry-run de `03 Analise.csv`.
 
-A análise editorial em si continua sendo produzida externamente (Claude no
-VS Code, manualmente) — este módulo só lê o CSV já existente, valida
-timestamps/ações editoriais e monta o relatório de dry-run. A geração real
-dos cortes (FFmpeg) fica para `app/cutter.py`, na Entrega 6.
+`03 Analise.csv` pode vir de duas origens — edição manual ou
+`app/analyzer.py` (geração automática via LLM) — mas este módulo é o único
+lugar que sabe ler/escrever/validar o CSV; nenhuma das duas origens
+duplica essa lógica. `evaluate_row()`/`get_video_duration_seconds()` são
+reaproveitados por `app/analyzer.py` para validar capítulos gerados por
+LLM exatamente como uma linha digitada manualmente. A geração real dos
+cortes (FFmpeg) fica em `app/cutter.py`.
 """
 
 import csv
@@ -107,6 +110,24 @@ def load_analysis(csv_path: Path) -> List[AnalysisRow]:
         return rows
 
 
+def write_analysis_csv(csv_path: Path, rows: List[AnalysisRow]) -> None:
+    """Grava `rows` em `csv_path` com o cabeçalho/ordem exatos da seção 15 do PRD.
+
+    Contraparte de `load_analysis()` — mesmo mapeamento de colunas
+    (`_COLUMN_TO_FIELD`), então qualquer CSV escrito aqui é lido de volta
+    sem perdas. `csv.DictWriter` cuida corretamente de vírgulas, aspas,
+    quebras de linha e acentuação; `utf-8-sig` para abrir bem no Excel/Sheets.
+    """
+    headers = list(_COLUMN_TO_FIELD.keys())
+    with csv_path.open("w", encoding="utf-8-sig", newline="") as fh:
+        writer = csv.DictWriter(fh, fieldnames=headers)
+        writer.writeheader()
+        for row in rows:
+            writer.writerow(
+                {column: getattr(row, field_name) for column, field_name in _COLUMN_TO_FIELD.items()}
+            )
+
+
 def classify_action(raw_action: str) -> str:
     normalized = _normalize(raw_action)
     if normalized in _KEEP_ACTIONS:
@@ -194,10 +215,10 @@ def build_dry_run_report(project_dir: Path) -> DryRunReport:
             "Gere-a e salve nesse caminho antes de rodar o dry-run."
         )
 
-    video_duration = _get_video_duration_seconds(video_path)
+    video_duration = get_video_duration_seconds(video_path)
     rows = load_analysis(csv_path)
 
-    chapters = [_evaluate_row(row, video_duration) for row in rows]
+    chapters = [evaluate_row(row, video_duration) for row in rows]
     warnings = _cross_row_warnings(chapters)
 
     return DryRunReport(
@@ -210,7 +231,13 @@ def build_dry_run_report(project_dir: Path) -> DryRunReport:
     )
 
 
-def _evaluate_row(row: AnalysisRow, video_duration_seconds: float) -> ChapterReport:
+def evaluate_row(row: AnalysisRow, video_duration_seconds: float) -> ChapterReport:
+    """Valida ação editorial + timestamps + duração de uma linha.
+
+    Reaproveitada por `build_dry_run_report` (CSV manual) e por
+    `app/analyzer.py` (CSV gerado por LLM) — motor único de validação,
+    qualquer que seja a origem da linha.
+    """
     action = classify_action(row.acao_editorial)
 
     if action == "discard":
@@ -301,7 +328,7 @@ def _cross_row_warnings(chapters: List[ChapterReport]) -> List[str]:
     return warnings
 
 
-def _get_video_duration_seconds(video_path: Path) -> float:
+def get_video_duration_seconds(video_path: Path) -> float:
     if shutil.which("ffprobe") is None:
         raise AnalysisError(
             "FFmpeg não foi encontrado.\n\n"

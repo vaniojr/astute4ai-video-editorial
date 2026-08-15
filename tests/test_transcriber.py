@@ -42,6 +42,9 @@ def _settings(tmp_path, whisper_model="tiny", whisper_language="en"):
         audio_bitrate_kbps=192,
         output_format="mp4",
         max_video_height=None,
+        analysis_provider="claude",
+        analysis_model="claude-sonnet-5",
+        analysis_temperature=0.0,
     )
 
 

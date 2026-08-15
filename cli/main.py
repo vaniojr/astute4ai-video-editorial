@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Optional
 
 import typer
+from dotenv import load_dotenv
 
 from app.analysis import (
     AnalysisError,
@@ -14,6 +15,7 @@ from app.analysis import (
     build_dry_run_report,
     filter_chapters,
 )
+from app.analyzer import AnalysisServiceError, analyze_project, plan_analysis
 from app.audio import AudioError, extract_audio
 from app.config import load_settings
 from app.cutter import CutRunResult, CutterError, generate_cuts
@@ -42,6 +44,7 @@ class CutMode(str, Enum):
 @app.callback()
 def _callback() -> None:
     """video-editorial: ferramenta local para produção editorial de vídeos."""
+    load_dotenv()
 
 
 @app.command()
@@ -159,6 +162,87 @@ def transcribe(
 
 
 @app.command()
+def analyze(
+    project: str = typer.Argument(..., help="Nome do diretório em projetos/ ou caminho do projeto."),
+    provider: Optional[str] = typer.Option(
+        None, "--provider", help="Provider de análise editorial (padrão: configuração)."
+    ),
+    model: Optional[str] = typer.Option(None, "--model", help="Modelo do provider (padrão: configuração)."),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Mostra o plano da análise (provider, modelo, tamanho) sem chamar a API."
+    ),
+    force: bool = typer.Option(
+        False, "--force", help="Gerar novamente mesmo se 03 Analise.csv já existir."
+    ),
+    yes: bool = typer.Option(
+        False, "--yes", help="Não pedir confirmação antes de chamar a API (uso em automação)."
+    ),
+) -> None:
+    """Gera 03 Analise.csv automaticamente via LLM, a partir de 01 Fonte.md e 02 Transcricao.md."""
+    settings = load_settings()
+    try:
+        project_dir = resolve_project_dir(project, settings)
+    except ProjectNotFoundError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1)
+
+    try:
+        plan = plan_analysis(project_dir, settings, provider=provider, model=model)
+    except AnalysisServiceError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1)
+
+    if dry_run:
+        _print_analysis_plan(plan)
+        return
+
+    if plan.already_exists and not force:
+        typer.echo("A análise já existe para este projeto.")
+        typer.echo("Use --force para gerar novamente.")
+        return
+
+    if plan.long_transcript_warning:
+        typer.echo(plan.long_transcript_warning)
+        typer.echo("")
+
+    if not yes:
+        typer.echo(f"Provider: {plan.provider}")
+        typer.echo(f"Modelo: {plan.model}")
+        typer.echo("A análise utilizará uma API externa e poderá gerar custos.")
+        if not _confirm_yes_no("Continuar? [s/N] "):
+            typer.echo("Cancelado.")
+            raise typer.Exit(code=0)
+
+    comando = f"analyze {project} --provider={provider} --model={model} --force={force}"
+    try:
+        result = analyze_project(project_dir, settings, provider=provider, model=model, force=force)
+    except AnalysisServiceError as exc:
+        log_event(project_dir, etapa="analyze", comando=comando, resultado="erro", erro=str(exc))
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1)
+
+    if result.skipped:
+        typer.echo("A análise já existe para este projeto.")
+        typer.echo("Use --force para gerar novamente.")
+        return
+
+    typer.echo("Análise concluída:\n")
+    typer.echo(str(plan.csv_path))
+    if result.usage:
+        typer.echo(f"Tokens: {result.usage.input_tokens} entrada / {result.usage.output_tokens} saída")
+    typer.echo("")
+
+    if result.dry_run_report is not None:
+        _print_dry_run_report(result.dry_run_report)
+    else:
+        typer.echo(
+            "Não foi possível validar os capítulos automaticamente (vídeo original "
+            "não encontrado). Rode 'video-editorial cut PROJECT --dry-run' depois de "
+            "baixar o vídeo."
+        )
+
+
+@app.command()
 def cut(
     project: str = typer.Argument(..., help="Nome do diretório em projetos/ ou caminho do projeto."),
     dry_run: bool = typer.Option(
@@ -262,6 +346,40 @@ def status(
 
 def _presence(path: Path) -> str:
     return "presente" if path.exists() else "ausente"
+
+
+def _print_analysis_plan(plan) -> None:
+    typer.echo("Projeto:")
+    typer.echo(plan.project_dir.name)
+    typer.echo("")
+    typer.echo("Provider:")
+    typer.echo(plan.provider)
+    typer.echo("")
+    typer.echo("Modelo:")
+    typer.echo(plan.model)
+    typer.echo("")
+    typer.echo("Fonte:")
+    typer.echo(plan.source_path.name)
+    typer.echo("")
+    typer.echo("Transcrição:")
+    typer.echo(plan.transcript_path.name)
+    typer.echo("")
+    typer.echo("Caracteres:")
+    typer.echo(f"{plan.transcript_char_count:,}".replace(",", "."))
+    typer.echo("")
+    typer.echo("Saída:")
+    typer.echo(plan.csv_path.name)
+    if plan.long_transcript_warning:
+        typer.echo("")
+        typer.echo(plan.long_transcript_warning)
+    typer.echo("")
+    typer.echo("DRY RUN")
+    typer.echo("Nenhuma chamada de API realizada.")
+
+
+def _confirm_yes_no(prompt: str) -> bool:
+    response = input(prompt)
+    return response.strip().lower() == "s"
 
 
 def _print_dry_run_report(report: DryRunReport) -> None:

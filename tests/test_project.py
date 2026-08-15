@@ -25,6 +25,9 @@ def _settings(tmp_path):
         audio_bitrate_kbps=192,
         output_format="mp4",
         max_video_height=None,
+        analysis_provider="claude",
+        analysis_model="claude-sonnet-5",
+        analysis_temperature=0.0,
     )
 
 
@@ -59,7 +62,7 @@ def test_create_project_creates_expected_subdirectories(tmp_path, monkeypatch):
 
     result = create_project("https://www.youtube.com/watch?v=7xgE4ZHNWRU", settings)
 
-    for subdir in ("original", "audio", "cortes", "thumbs", "publicados", "logs"):
+    for subdir in ("original", "audio", "cortes", "thumbs", "publicados", "logs", "analysis"):
         assert (result.path / subdir).is_dir()
 
 
