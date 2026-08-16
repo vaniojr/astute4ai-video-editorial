@@ -1,5 +1,6 @@
 import json
 from dataclasses import dataclass
+from pathlib import Path
 
 import pytest
 
@@ -280,6 +281,69 @@ def test_generate_thumbnail_writes_versioned_images_from_provider(tmp_path, monk
     metadata = json.loads(result.metadata_path.read_text(encoding="utf-8"))
     assert metadata["status"] == "generated"
     assert metadata["images"] == ["thumbnail_v001.png", "thumbnail_v002.png"]
+
+
+def _fake_ffprobe_and_resize(monkeypatch, *, duration_seconds=6303.0, resize_succeeds=True, captured_cmds=None):
+    def _fake_run(cmd, capture_output=True, text=True):
+        if captured_cmds is not None:
+            captured_cmds.append(cmd)
+        if cmd[0] == "ffprobe":
+            return _FakeCompletedProcess(returncode=0, stdout=str(duration_seconds))
+        if resize_succeeds:
+            Path(cmd[-1]).write_bytes(b"resized png bytes")
+            return _FakeCompletedProcess(returncode=0)
+        return _FakeCompletedProcess(returncode=1, stderr="erro de resize")
+
+    monkeypatch.setattr(ffmpeg_utils_module.subprocess, "run", _fake_run)
+    monkeypatch.setattr(ffmpeg_utils_module.shutil, "which", lambda name: f"/usr/bin/{name}")
+
+
+def test_generate_thumbnail_resizes_image_to_brand_dimensions(tmp_path, monkeypatch):
+    settings = _settings(tmp_path)
+    _write_generic_brand(settings.brands_dir)
+    project_dir = _make_project(tmp_path)
+    captured = []
+    _fake_ffprobe_and_resize(monkeypatch, captured_cmds=captured)
+    _patch_extract_frames(monkeypatch)
+    _patch_provider(monkeypatch, _FakeImageProvider(image_count=1))
+
+    result = generate_thumbnail(project_dir, settings, chapter=8)
+
+    assert result.image_paths[0].read_bytes() == b"resized png bytes"
+    ffmpeg_cmds = [cmd for cmd in captured if cmd[0] == "ffmpeg"]
+    assert len(ffmpeg_cmds) == 1
+    cmd_str = " ".join(ffmpeg_cmds[0])
+    assert "scale=1280:720:force_original_aspect_ratio=increase" in cmd_str
+    assert "crop=1280:720" in cmd_str
+
+
+def test_generate_thumbnail_keeps_original_image_when_resize_fails(tmp_path, monkeypatch):
+    settings = _settings(tmp_path)
+    _write_generic_brand(settings.brands_dir)
+    project_dir = _make_project(tmp_path)
+    _fake_ffprobe_and_resize(monkeypatch, resize_succeeds=False)
+    _patch_extract_frames(monkeypatch)
+    _patch_provider(monkeypatch, _FakeImageProvider(image_count=1))
+
+    result = generate_thumbnail(project_dir, settings, chapter=8)
+
+    assert result.image_paths[0].read_bytes() == b"fake png bytes"
+
+
+def test_generate_thumbnail_keeps_original_image_when_ffmpeg_unavailable(tmp_path, monkeypatch):
+    settings = _settings(tmp_path)
+    _write_generic_brand(settings.brands_dir)
+    project_dir = _make_project(tmp_path)
+    _fake_ffprobe(monkeypatch)
+    monkeypatch.setattr(
+        ffmpeg_utils_module.shutil, "which", lambda name: None if name == "ffmpeg" else f"/usr/bin/{name}"
+    )
+    _patch_extract_frames(monkeypatch)
+    _patch_provider(monkeypatch, _FakeImageProvider(image_count=1))
+
+    result = generate_thumbnail(project_dir, settings, chapter=8)
+
+    assert result.image_paths[0].read_bytes() == b"fake png bytes"
 
 
 def test_generate_thumbnail_force_adds_new_versions_without_overwriting(tmp_path, monkeypatch):

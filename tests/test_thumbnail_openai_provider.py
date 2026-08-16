@@ -135,6 +135,23 @@ def test_generate_forwards_model_and_prompt(tmp_path, monkeypatch):
     assert len(kwargs["image"]) == 1
 
 
+def test_generate_forwards_safe_margin_instruction_in_prompt(tmp_path, monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    import base64
+
+    encoded = base64.b64encode(b"x").decode("ascii")
+    response = _FakeImagesResponse(data=[_FakeImageData(b64_json=encoded)])
+    images = _FakeImages(response=response)
+    _patch_client(monkeypatch, _FakeClient(images))
+
+    provider = OpenAIThumbnailProvider(model="gpt-image-1")
+    provider.generate(_request(tmp_path))
+
+    prompt = images.last_kwargs["prompt"]
+    assert "MARGEM DE SEGURANÇA" in prompt
+    assert "recortada a partir do centro" in prompt
+
+
 def test_generate_resolves_landscape_size_from_brand(tmp_path, monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     import base64

@@ -4,6 +4,14 @@ Resumo em destaques do que cada versão trouxe, pensado para leitura rápida —
 "o que dá pra fazer agora que não dava antes". Para detalhe técnico
 (arquivos, commits, decisões), veja [CHANGELOG.md](CHANGELOG.md).
 
+## v0.9.1 — 2026-08-16
+
+- **Correção de thumbnail**: achados em teste manual real — a imagem
+  gerada via `--provider openai` agora sai sempre no tamanho configurado
+  na marca (antes saía no tamanho fixo do `gpt-image-1`, ex. 1536×1024 em
+  vez de 1280×720), e o prompt passou a instruir margens de segurança
+  para o texto não ficar cortado na borda da imagem.
+
 ## v0.9.0 — 2026-08-15
 
 - **Geração real de thumbnail**: `thumbnail --provider openai` já gera a

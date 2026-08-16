@@ -1,15 +1,22 @@
 """Orquestração dos comandos `thumbnail`/`thumbnail-select`.
 
 Frames + briefing + headlines funcionam integralmente sem nenhuma API paga
-(`--provider manual`, único disponível por enquanto — `app/thumbnail_provider.py`
-nunca importa SDK de nenhum provider real). Quando um provider real gerar
-imagens, este módulo é quem aplica versionamento (`app/versioning.py`) e
-grava os arquivos — o provider só devolve bytes, nunca decide nome de
-arquivo (mesma separação que `app/cutter.py` já usa para os cortes).
+(`--provider manual`). Com um provider real (`openai`), este módulo é quem
+aplica versionamento (`app/versioning.py`) e grava os arquivos — o
+provider só devolve bytes, nunca decide nome de arquivo (mesma separação
+que `app/cutter.py` já usa para os cortes).
+
+Também é este módulo (não o provider) que garante o tamanho final da
+imagem: providers de geração de imagem geralmente só aceitam alguns
+tamanhos fixos (o `gpt-image-1`, por exemplo, não aceita `1280x720`
+diretamente) — depois de gerada, a imagem é recortada a partir do centro
+e redimensionada para bater exatamente com `brand.thumbnail.width/height`,
+independente do que o provider devolveu.
 """
 
 import json
 import shutil
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional
@@ -18,6 +25,7 @@ from app.analysis import AnalysisError, ChapterReport, build_dry_run_report, sel
 from app.brands import Brand, load_brand
 from app.config import Settings
 from app.cutter import CutterError, build_cut_filename
+from app.ffmpeg_utils import is_binary_available, run
 from app.logging_utils import log_operation
 from app.project import Project, load_project
 from app.thumbnail_briefing import build_briefing, build_headline_options
@@ -163,7 +171,10 @@ def generate_thumbnail(
         for image in provider_result.images:
             version = next_version_number(plan.thumb_dir, _IMAGE_GLOB)
             image_path = plan.thumb_dir / f"thumbnail_{format_version(version)}.png"
-            image_path.write_bytes(image.content)
+            content = _normalize_image_size(
+                image.content, width=plan.brand.thumbnail.width, height=plan.brand.thumbnail.height
+            )
+            image_path.write_bytes(content)
             image_paths.append(image_path)
 
         metadata = {
@@ -237,3 +248,43 @@ def select_thumbnail_version(
         )
 
     return ThumbnailSelectionResult(thumb_dir=plan.thumb_dir, selected_path=selected_path, version=version)
+
+
+def _normalize_image_size(content: bytes, *, width: int, height: int) -> bytes:
+    """Recorta (a partir do centro) e redimensiona a imagem gerada para `width`x`height`.
+
+    Providers de geração de imagem costumam só aceitar alguns tamanhos
+    fixos — `gpt-image-1`, por exemplo, não aceita `1280x720` diretamente
+    (só `1024x1024`/`1536x1024`/`1024x1536`). Em vez de cada provider
+    tentar adivinhar o tamanho exato configurado na marca, este passo
+    único garante o tamanho final certo, qualquer que seja o provider.
+
+    Se o FFmpeg não estiver disponível ou o recorte falhar, devolve o
+    conteúdo original sem falhar o comando inteiro — a imagem já foi
+    gerada (e paga); perder o resultado por causa do redimensionamento
+    seria pior do que entregá-la no tamanho que o provider devolveu.
+    """
+    if not is_binary_available("ffmpeg"):
+        return content
+
+    with tempfile.TemporaryDirectory(prefix="video-editorial-thumbnail-resize-") as tmp:
+        tmp_dir = Path(tmp)
+        input_path = tmp_dir / "input.png"
+        output_path = tmp_dir / "output.png"
+        input_path.write_bytes(content)
+
+        result = run(
+            [
+                "ffmpeg",
+                "-y",
+                "-i",
+                str(input_path),
+                "-vf",
+                f"scale={width}:{height}:force_original_aspect_ratio=increase,crop={width}:{height}",
+                str(output_path),
+            ]
+        )
+        if result.returncode != 0 or not output_path.is_file():
+            return content
+
+        return output_path.read_bytes()

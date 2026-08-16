@@ -29,7 +29,12 @@ from app.thumbnail_provider import (
 _RESTRICOES = (
     "Não invente participantes que não estejam nas imagens de referência anexadas.\n"
     "Não apresente nenhuma alegação não verificada como fato no texto da thumbnail.\n"
-    "Priorize rosto/personagem em destaque, texto curto e legível, alto contraste."
+    "Priorize rosto/personagem em destaque, texto curto e legível, alto contraste.\n"
+    "MARGEM DE SEGURANÇA (obrigatório): nenhum texto, rosto ou elemento essencial pode "
+    "tocar ou ultrapassar a borda da imagem — deixe uma margem livre de pelo menos 8% da "
+    "largura em cada lateral e 8% da altura no topo/base. Texto cortado na borda é um erro "
+    "grave. A imagem será recortada a partir do centro para o formato final depois de "
+    "gerada, então mantenha texto, rosto e logo concentrados no terço central da composição."
 )
 
 

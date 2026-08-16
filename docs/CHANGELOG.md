@@ -8,6 +8,43 @@ correspondente (`git show <hash>`) ou o `docs/PRD_Video_Editorial*.md` da
 época. Para um resumo por versão (menos técnico), veja
 [RELEASE_NOTES.md](RELEASE_NOTES.md).
 
+## 2026-08-16 — Correção: tamanho da thumbnail e texto cortado na borda
+
+- Achados em teste manual real contra um projeto de produção
+  (`--provider openai`): (1) a imagem gerada saía no tamanho fixo que o
+  `gpt-image-1` aceita (1536×1024), não no tamanho configurado na marca
+  (`brand.thumbnail`, ex. 1280×720); (2) o texto do headline aparecia
+  encostando/ultrapassando a borda esquerda da imagem.
+- **Tamanho**: `app/thumbnail_service.py` ganha `_normalize_image_size()`,
+  chamada em `generate_thumbnail()` logo após o provider devolver os
+  bytes — recorta a partir do centro e redimensiona via FFmpeg
+  (`scale=W:H:force_original_aspect_ratio=increase,crop=W:H`) para bater
+  exatamente com `brand.thumbnail.width/height`, qualquer que seja o
+  tamanho fixo devolvido pelo provider. Decisão de arquitetura: o ajuste
+  fica no service, não no provider — desacopla "quais tamanhos o
+  provider X aceita" de "qual tamanho a marca quer", e já vale para um
+  segundo provider de imagem se um dia for adicionado. Se o FFmpeg não
+  estiver disponível ou o recorte falhar, devolve os bytes originais sem
+  falhar o comando — a imagem já foi gerada (e paga); perder o resultado
+  por causa do redimensionamento seria pior do que entregá-la no tamanho
+  que o provider devolveu.
+- **Texto na borda**: `_RESTRICOES` em `app/thumbnail_openai_provider.py`
+  ganha uma instrução explícita de margem de segurança (mínimo 8% da
+  largura/altura livre em cada borda, texto/rosto/logo concentrados no
+  terço central) e um aviso de que a imagem será recortada a partir do
+  centro depois de gerada — o prompt original nunca instruía o modelo
+  sobre margens.
+- Cobertura de testes: 3 novos testes para `_normalize_image_size()`
+  (redimensiona com sucesso, mantém a imagem original se o FFmpeg falhar,
+  mantém a imagem original se o FFmpeg não estiver disponível) e 1 novo
+  teste confirmando que a instrução de margem de segurança chega ao
+  prompt enviado à OpenAI.
+- Validado com uma nova chamada real (paga) no mesmo projeto/capítulo que
+  encontrou os dois problemas: `thumbnail_v002.png` saiu em 1280×720
+  (antes 1536×1024) e o headline ficou inteiramente dentro da imagem, com
+  margem visível nas quatro bordas (antes tocava/ultrapassava a borda
+  esquerda).
+
 ## 2026-08-15 — Entrega 9.2: Thumbnail — geração real de imagem via OpenAI
 
 - Novo provider `openai` (`app/thumbnail_openai_provider.py`, único
