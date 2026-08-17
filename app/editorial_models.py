@@ -30,8 +30,17 @@ class SourceAttribution:
 
 @dataclass(frozen=True)
 class Cta:
+    """Exatamente um entre `text`/`image`/`video` quando `enabled=True` —
+
+    garantido na origem por `app/brands.py::_validate_features` (o brand
+    profile já não carrega se tiver zero ou mais de uma opção configurada),
+    então o restante do pipeline confia nessa invariante sem revalidar.
+    """
+
     enabled: bool
     text: Optional[str] = None
+    image: Optional[str] = None
+    video: Optional[str] = None
 
 
 @dataclass(frozen=True)

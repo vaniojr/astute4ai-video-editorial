@@ -39,6 +39,7 @@ class VideoProperties:
     height: int
     fps: float
     sample_rate: int
+    has_audio: bool = True
 
 
 def probe_video_properties(video_path: Path) -> VideoProperties:
@@ -84,6 +85,7 @@ def probe_video_properties(video_path: Path) -> VideoProperties:
         height=int(video_stream["height"]),
         fps=_parse_frame_rate(video_stream.get("r_frame_rate", "30/1")),
         sample_rate=sample_rate,
+        has_audio=audio_stream is not None,
     )
 
 

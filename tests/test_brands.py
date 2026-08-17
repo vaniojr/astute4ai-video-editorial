@@ -92,6 +92,69 @@ def test_load_brand_raises_when_cta_enabled_without_text(tmp_path):
         load_brand("sem-cta", brands_dir)
 
 
+def test_load_brand_raises_when_cta_enabled_with_two_options(tmp_path):
+    brands_dir = tmp_path / "brands"
+    brand_dir = _write_brand(
+        brands_dir,
+        "cta-ambiguo",
+        '[brand]\nslug = "cta-ambiguo"\nname = "CTA Ambíguo"\n\n'
+        '[features]\ncta_enabled = true\n\n'
+        '[video]\ncta_text = "Texto"\ncta_image = "assets/cta.png"\n',
+    )
+    (brand_dir / "assets").mkdir()
+    (brand_dir / "assets" / "cta.png").write_bytes(b"fake png")
+
+    with pytest.raises(BrandConfigError):
+        load_brand("cta-ambiguo", brands_dir)
+
+
+def test_load_brand_raises_when_cta_image_file_missing(tmp_path):
+    brands_dir = tmp_path / "brands"
+    _write_brand(
+        brands_dir,
+        "cta-imagem-sem-arquivo",
+        '[brand]\nslug = "cta-imagem-sem-arquivo"\nname = "Sem Arquivo"\n\n'
+        '[features]\ncta_enabled = true\n\n[video]\ncta_image = "assets/cta.png"\n',
+    )
+
+    with pytest.raises(BrandConfigError):
+        load_brand("cta-imagem-sem-arquivo", brands_dir)
+
+
+def test_load_brand_accepts_cta_image_when_file_present(tmp_path):
+    brands_dir = tmp_path / "brands"
+    brand_dir = _write_brand(
+        brands_dir,
+        "cta-imagem",
+        '[brand]\nslug = "cta-imagem"\nname = "CTA Imagem"\n\n'
+        '[features]\ncta_enabled = true\n\n[video]\ncta_image = "assets/cta.png"\n',
+    )
+    (brand_dir / "assets").mkdir()
+    (brand_dir / "assets" / "cta.png").write_bytes(b"fake png")
+
+    brand = load_brand("cta-imagem", brands_dir)
+
+    assert brand.video.cta_image == brand_dir / "assets" / "cta.png"
+    assert brand.video.cta_video is None
+
+
+def test_load_brand_accepts_cta_video_when_file_present(tmp_path):
+    brands_dir = tmp_path / "brands"
+    brand_dir = _write_brand(
+        brands_dir,
+        "cta-video",
+        '[brand]\nslug = "cta-video"\nname = "CTA Vídeo"\n\n'
+        '[features]\ncta_enabled = true\n\n[video]\ncta_video = "assets/cta.mp4"\n',
+    )
+    (brand_dir / "assets").mkdir()
+    (brand_dir / "assets" / "cta.mp4").write_bytes(b"fake mp4")
+
+    brand = load_brand("cta-video", brands_dir)
+
+    assert brand.video.cta_video == brand_dir / "assets" / "cta.mp4"
+    assert brand.video.cta_image is None
+
+
 def test_load_brand_accepts_logo_when_asset_present(tmp_path):
     brands_dir = tmp_path / "brands"
     brand_dir = _write_brand(

@@ -116,7 +116,14 @@ def build_editorial_plan(
         start, end = timing
         highlights.append(Highlight(text=raw_highlight.quote, start=start, end=end))
 
-    cta_text = brand.video.cta_text if brand.features.cta_enabled else None
+    cta = Cta(enabled=False)
+    if brand.features.cta_enabled:
+        if brand.video.cta_text:
+            cta = Cta(enabled=True, text=brand.video.cta_text)
+        elif brand.video.cta_image:
+            cta = Cta(enabled=True, image=str(brand.video.cta_image))
+        elif brand.video.cta_video:
+            cta = Cta(enabled=True, video=str(brand.video.cta_video))
 
     return EditorialPlan(
         chapter=chapter,
@@ -128,7 +135,7 @@ def build_editorial_plan(
         lower_thirds=[],
         context_cards=context_cards,
         highlights=highlights,
-        cta=Cta(enabled=bool(cta_text), text=cta_text),
+        cta=cta,
         provider=provider,
         model=model,
     )

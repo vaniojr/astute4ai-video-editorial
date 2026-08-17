@@ -107,6 +107,34 @@ def _fake_subprocess(monkeypatch, *, ffmpeg_returncode=0, ffmpeg_stderr="", capt
     monkeypatch.setattr(ffmpeg_utils_module.subprocess, "run", _fake_run)
 
 
+def _fake_subprocess_with_media_probe(
+    monkeypatch, *, no_audio_path=None, duration_seconds=12.5, ffmpeg_returncode=0, captured_cmds=None
+):
+    """Como `_fake_subprocess`, mas distingue os dois formatos de ffprobe usados
+    por `_append_cta_video_inputs` (streams vs. duração) e permite simular um
+    arquivo de CTA sem trilha de áudio (`no_audio_path`).
+    """
+
+    def _fake_run(cmd, capture_output=True, text=True):
+        if captured_cmds is not None:
+            captured_cmds.append(cmd)
+        if cmd[0] == "ffprobe":
+            if "format=duration" in cmd:
+                return _FakeCompletedProcess(returncode=0, stdout=str(duration_seconds))
+            has_audio = str(no_audio_path) != cmd[-1] if no_audio_path is not None else True
+            streams = [{"codec_type": "video", "width": 1280, "height": 720, "r_frame_rate": "30/1"}]
+            if has_audio:
+                streams.append({"codec_type": "audio", "sample_rate": "44100"})
+            return _FakeCompletedProcess(returncode=0, stdout=json.dumps({"streams": streams}))
+        output_path = Path(cmd[-1])
+        if ffmpeg_returncode == 0:
+            output_path.write_bytes(b"fake rendered video")
+        return _FakeCompletedProcess(returncode=ffmpeg_returncode)
+
+    monkeypatch.setattr(ffmpeg_utils_module.shutil, "which", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr(ffmpeg_utils_module.subprocess, "run", _fake_run)
+
+
 def _make_cut_file(tmp_path):
     cut_path = tmp_path / "cortes" / "008_cap08_teste.mp4"
     cut_path.parent.mkdir(parents=True, exist_ok=True)
@@ -196,6 +224,98 @@ def test_render_includes_only_intro_when_cta_disabled(tmp_path, monkeypatch):
     assert result.cta_included is False
     ffmpeg_cmds = [cmd for cmd in captured if cmd[0] == "ffmpeg"]
     assert "concat=n=2:v=1:a=1" in " ".join(ffmpeg_cmds[0])
+
+
+def _plan_with_cta(cta, *, brand_slug="bussola-politica"):
+    return EditorialPlan(
+        chapter="8",
+        cut_file="008_cap08_teste.mp4",
+        brand=brand_slug,
+        version=1,
+        intro=Intro(mode="disabled"),
+        source_attribution=SourceAttribution(text=""),
+        context_cards=[],
+        highlights=[],
+        cta=cta,
+        provider="claude",
+        model="claude-sonnet-5",
+    )
+
+
+def test_render_cta_image_uses_loop_and_letterbox(tmp_path, monkeypatch):
+    captured = []
+    _fake_subprocess_with_media_probe(monkeypatch, captured_cmds=captured)
+    settings = _settings(tmp_path)
+    cut_path = _make_cut_file(tmp_path)
+    output_path = tmp_path / "final" / "out.mp4"
+    image_path = tmp_path / "brands" / "bussola-politica" / "assets" / "cta.png"
+
+    plan = _plan_with_cta(Cta(enabled=True, image=str(image_path)))
+    result = render_editorial_video(plan, cut_path, _brand(tmp_path), output_path, settings)
+
+    assert result.cta_included is True
+    ffmpeg_cmds = [cmd for cmd in captured if cmd[0] == "ffmpeg"]
+    cmd = ffmpeg_cmds[0]
+    assert "-loop" in cmd
+    assert str(image_path) in cmd
+    cmd_str = " ".join(cmd)
+    assert "force_original_aspect_ratio=decrease" in cmd_str
+    assert "concat=n=2:v=1:a=1" in cmd_str
+
+
+def test_render_cta_image_not_skipped_without_font(tmp_path, monkeypatch):
+    captured = []
+    _fake_subprocess_with_media_probe(monkeypatch, captured_cmds=captured)
+    settings = _settings(tmp_path)
+    cut_path = _make_cut_file(tmp_path)
+    output_path = tmp_path / "final" / "out.mp4"
+    image_path = tmp_path / "brands" / "bussola-politica" / "assets" / "cta.png"
+
+    plan = _plan_with_cta(Cta(enabled=True, image=str(image_path)))
+    result = render_editorial_video(plan, cut_path, _brand(tmp_path, with_font=False), output_path, settings)
+
+    assert result.cta_included is True
+    assert result.skipped_text_reason is None
+
+
+def test_render_cta_video_uses_own_duration_and_reused_audio(tmp_path, monkeypatch):
+    captured = []
+    _fake_subprocess_with_media_probe(monkeypatch, duration_seconds=7.0, captured_cmds=captured)
+    settings = _settings(tmp_path)
+    cut_path = _make_cut_file(tmp_path)
+    output_path = tmp_path / "final" / "out.mp4"
+    video_path = tmp_path / "brands" / "bussola-politica" / "assets" / "cta.mp4"
+
+    plan = _plan_with_cta(Cta(enabled=True, video=str(video_path)))
+    result = render_editorial_video(plan, cut_path, _brand(tmp_path), output_path, settings)
+
+    assert result.cta_included is True
+    ffmpeg_cmds = [cmd for cmd in captured if cmd[0] == "ffmpeg"]
+    cmd = ffmpeg_cmds[0]
+    assert str(video_path) in cmd
+    cmd_str = " ".join(cmd)
+    assert "concat=n=2:v=1:a=1" in cmd_str
+    assert "anullsrc" not in cmd_str
+
+
+def test_render_cta_video_without_audio_generates_matching_silence(tmp_path, monkeypatch):
+    captured = []
+    video_path = tmp_path / "brands" / "bussola-politica" / "assets" / "cta-sem-audio.mp4"
+    _fake_subprocess_with_media_probe(
+        monkeypatch, no_audio_path=video_path, duration_seconds=9.0, captured_cmds=captured
+    )
+    settings = _settings(tmp_path)
+    cut_path = _make_cut_file(tmp_path)
+    output_path = tmp_path / "final" / "out.mp4"
+
+    plan = _plan_with_cta(Cta(enabled=True, video=str(video_path)))
+    result = render_editorial_video(plan, cut_path, _brand(tmp_path), output_path, settings)
+
+    assert result.cta_included is True
+    ffmpeg_cmds = [cmd for cmd in captured if cmd[0] == "ffmpeg"]
+    cmd_str = " ".join(ffmpeg_cmds[0])
+    assert "anullsrc" in cmd_str
+    assert "atrim=duration=9.0" in cmd_str
 
 
 def test_render_includes_cards_as_overlay_not_extra_segment(tmp_path, monkeypatch):

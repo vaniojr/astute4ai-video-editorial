@@ -8,6 +8,45 @@ correspondente (`git show <hash>`) ou o `docs/PRD_Video_Editorial*.md` da
 época. Para um resumo por versão (menos técnico), veja
 [RELEASE_NOTES.md](RELEASE_NOTES.md).
 
+## 2026-08-16 — Entrega 10: CTA com 3 opções — texto, imagem ou vídeo fixo
+
+- `video.cta_image`/`video.cta_video` no `brand.toml` (`app/brands.py`),
+  ao lado do já existente `video.cta_text` — com `cta_enabled=true`,
+  exatamente uma das três deve estar preenchida; zero ou mais de uma vira
+  `BrandConfigError` explícito ao carregar o profile (nunca escolhe uma
+  prioridade silenciosamente). Caminho de imagem/vídeo também precisa
+  apontar para um arquivo existente, mesma checagem já usada em
+  `logo`/`intro`/`outro`.
+- `Cta` (`app/editorial_models.py`) ganha `image`/`video` ao lado de
+  `text` — o conteúdo do CTA é copiado do brand para o plano editorial em
+  `app/editorial_planner.py` na hora do `editorialize` (não é relido do
+  `brand.toml` no `render`), então planos antigos continuam carregando
+  normalmente (campos novos com default `None`).
+- `render` (`app/editorial_renderer.py`) ganha dois jeitos novos de montar
+  o segmento do CTA:
+  - **imagem**: `-loop` pela duração de `editorial_cta_seconds`, com
+    letterbox (escala preservando proporção + preenchimento com
+    `colors.background`) para o tamanho do corte — nunca corta a imagem,
+    diferente do recorte central usado pela thumbnail (lá cortar um rosto
+    é aceitável; aqui a peça já tem elementos posicionados de propósito).
+  - **vídeo pronto**: duração é a do próprio arquivo (não
+    `editorial_cta_seconds`); reaproveita a trilha de áudio original
+    quando existe, gera silêncio na duração certa quando não existe.
+    `VideoProperties` (`app/ffmpeg_utils.py`) ganha `has_audio: bool` para
+    essa decisão.
+- CTA por imagem/vídeo não exige `brand.assets.primary_font` — só a
+  variante em texto desenha algo com `drawtext`; esse gate era aplicado a
+  todo o bloco de CTA antes desta entrega.
+- `brands/brand.reference.toml` documenta as 3 opções e a regra de
+  exclusividade.
+- Validado com FFmpeg real (sem custo, nenhuma API paga envolvida):
+  imagem 1000x1000 e vídeo vertical 800x1200 letterboxed corretamente
+  para 1920x1080 sem cortar; duração do segmento de CTA bate com
+  `editorial_cta_seconds` (imagem) ou com a duração do próprio arquivo
+  (vídeo); áudio original do vídeo de CTA preservado (tom de 880Hz
+  detectado via `volumedetect`) quando presente, silêncio gerado
+  (-90dB) na duração certa quando ausente.
+
 ## 2026-08-16 — Correção: tamanho da thumbnail e texto cortado na borda
 
 - Achados em teste manual real contra um projeto de produção

@@ -4,6 +4,14 @@ Resumo em destaques do que cada versão trouxe, pensado para leitura rápida —
 "o que dá pra fazer agora que não dava antes". Para detalhe técnico
 (arquivos, commits, decisões), veja [CHANGELOG.md](CHANGELOG.md).
 
+## v0.10.0 — 2026-08-16
+
+- **CTA com 3 opções**: além do texto gerado na hora, o CTA final do
+  vídeo agora também pode ser uma imagem estática ou um vídeo pronto
+  (`brand.toml`: `video.cta_image`/`video.cta_video`) — exatamente uma
+  das três opções por marca, validado no carregamento do profile. Vídeo
+  de CTA usa sua própria duração e mantém o áudio original quando tem.
+
 ## v0.9.1 — 2026-08-16
 
 - **Correção de thumbnail**: achados em teste manual real — a imagem

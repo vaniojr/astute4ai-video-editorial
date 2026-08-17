@@ -1,5 +1,6 @@
 import json
 from datetime import date, datetime
+from pathlib import Path
 
 from app.brands import Brand, BrandAssets, BrandColors, BrandFeatures, BrandThumbnailConfig, BrandVideoConfig
 from app.editorial_planner import (
@@ -286,6 +287,52 @@ def test_build_editorial_plan_cta_from_brand_not_ai():
 
     assert plan.cta.enabled is True
     assert plan.cta.text == "BÚSSOLA POLÍTICA"
+
+
+def test_build_editorial_plan_cta_from_brand_image():
+    candidate = EditorialCandidate(intro_text="", context_cards=[], highlights=[])
+    brand = _brand(video=BrandVideoConfig(cta_image=Path("/brands/bussola/assets/cta.png")))
+
+    plan = build_editorial_plan(
+        candidate,
+        chapter="8",
+        cut_file="008_cap08_teste.mp4",
+        brand=brand,
+        project=_project(),
+        version=1,
+        provider="claude",
+        model="claude-sonnet-5",
+        cut_duration_seconds=100.0,
+        transcript_segments=[],
+    )
+
+    assert plan.cta.enabled is True
+    assert plan.cta.text is None
+    assert plan.cta.image == "/brands/bussola/assets/cta.png"
+    assert plan.cta.video is None
+
+
+def test_build_editorial_plan_cta_from_brand_video():
+    candidate = EditorialCandidate(intro_text="", context_cards=[], highlights=[])
+    brand = _brand(video=BrandVideoConfig(cta_video=Path("/brands/bussola/assets/cta.mp4")))
+
+    plan = build_editorial_plan(
+        candidate,
+        chapter="8",
+        cut_file="008_cap08_teste.mp4",
+        brand=brand,
+        project=_project(),
+        version=1,
+        provider="claude",
+        model="claude-sonnet-5",
+        cut_duration_seconds=100.0,
+        transcript_segments=[],
+    )
+
+    assert plan.cta.enabled is True
+    assert plan.cta.text is None
+    assert plan.cta.video == "/brands/bussola/assets/cta.mp4"
+    assert plan.cta.image is None
 
 
 def test_build_editorial_plan_cta_disabled_when_brand_feature_disabled():

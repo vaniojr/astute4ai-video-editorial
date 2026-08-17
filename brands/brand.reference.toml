@@ -1,0 +1,137 @@
+# ============================================================================
+# brand.reference.toml — referência de TODOS os campos possíveis em um
+# Brand Profile (`brands/<slug>/brand.toml`).
+#
+# Este arquivo NÃO é um profile válido — fica solto na raiz de `brands/`
+# (fora de um diretório), então `list_brands()`/`--brand` nunca o
+# enxergam. Sirva-se dele como referência/copiar-e-colar; nenhum comando
+# carrega este arquivo em nenhuma situação.
+#
+# Para criar um profile novo de verdade: copie este conteúdo para
+# `brands/<seu-slug>/brand.toml`, apague os comentários e os campos que
+# não fizer sentido usar (todo campo tem um default seguro quando ausente
+# — veja `app/brands.py`, único módulo que faz parsing deste arquivo).
+# ============================================================================
+
+[brand]
+# Nome de exibição da marca. Único campo obrigatório do arquivo inteiro —
+# se faltar, `load_brand()` recusa o profile (BrandConfigError).
+name = "Nome da Marca"
+
+# Campo decorativo — NÃO é lido pelo código (a identidade real do profile
+# vem do nome do diretório em `brands/<slug>/`, e é isso que você passa em
+# `--brand <slug>`). Mantido aqui só como documentação humana dentro do
+# próprio arquivo.
+slug = "nome-da-marca"
+
+
+# ----------------------------------------------------------------------
+# [colors] — usadas em dois lugares com propósitos diferentes:
+#   1. `render` (vídeo final): drawtext/caixas via FFmpeg, cor exata,
+#      pixel a pixel — hoje só `background` e `text` são efetivamente
+#      desenhados (fundo dos cards/intro/CTA e cor do texto).
+#   2. `thumbnail --provider openai`: as 4 cores são citadas no prompt
+#      como "direção visual" para o modelo generativo seguir — é uma
+#      sugestão para a IA, não uma cor exata garantida pixel a pixel
+#      (diferente do vídeo, onde o FFmpeg desenha a cor exata).
+# Formato: qualquer string de cor que o FFmpeg aceite (hex "#RRGGBB" é o
+# mais simples e o que os profiles existentes usam).
+# ----------------------------------------------------------------------
+[colors]
+primary = "#FFFFFF"     # cor de destaque geral da marca (hoje: só sugestão no prompt da thumbnail)
+background = "#000000"  # fundo de intro/CTA/caixa dos cards no vídeo renderizado + sugestão na thumbnail
+text = "#FFFFFF"         # cor do texto desenhado no vídeo (drawtext) + sugestão na thumbnail
+accent = "#888888"       # cor de ênfase/contraste (hoje: só sugestão no prompt da thumbnail)
+
+
+# ----------------------------------------------------------------------
+# [typography] — fonte usada por TODO texto desenhado no vídeo (intro,
+# CTA, cards de contexto, atribuição de fonte). Caminho relativo a este
+# diretório (`brands/<slug>/...`).
+#
+# Sem `primary_font` configurado (ou arquivo inexistente): `render` ainda
+# gera o vídeo final normalmente, só pula TODOS os textos desenhados (uma
+# única mensagem de aviso, não uma por recurso) — nunca falha o comando
+# por causa de fonte ausente.
+#
+# Requer um FFmpeg com suporte a `drawtext` (libfreetype) — no macOS via
+# Homebrew, use `ffmpeg-full`, não o `ffmpeg` padrão (que não tem esse
+# suporte). Veja o README para o comando exato.
+# ----------------------------------------------------------------------
+[typography]
+primary_font = "assets/fonts/MinhaFonte-Bold.ttf"
+
+
+# ----------------------------------------------------------------------
+# [features] — liga/desliga cada recurso. Cada `*_enabled = true` EXIGE o
+# asset/config correspondente (ver comentários em [assets]/[video]
+# abaixo) — se faltar, `load_brand()` falha alto e claro
+# (BrandConfigError) em vez de silenciosamente ignorar a feature.
+#
+# `logo_enabled`, `intro_enabled` e `outro_enabled` já existem no modelo
+# de dados (`app/brands.py`) e já são validados aqui, mas AINDA NÃO são
+# consumidos por nenhum comando (`render`/`thumbnail`) — são reservados
+# para uma entrega futura. Hoje, ligá-los só garante que o asset existe;
+# não muda nada no vídeo/thumbnail gerado.
+# ----------------------------------------------------------------------
+[features]
+logo_enabled = false                  # reservado para uso futuro (ver assets.logo)
+intro_enabled = false                 # reservado para uso futuro (ver assets.intro)
+outro_enabled = false                 # reservado para uso futuro (ver assets.outro)
+cta_enabled = false                   # true => `render` desenha o CTA (video.cta_text) no fim do vídeo
+source_attribution_enabled = false    # true => `render` desenha a atribuição de fonte sobre o corte
+
+
+# ----------------------------------------------------------------------
+# [assets] — caminhos de arquivo relativos a este diretório
+# (`brands/<slug>/...`). Nenhum é obrigatório por si só; cada um só passa
+# a ser exigido se a respectiva feature em [features] estiver `true`.
+# ----------------------------------------------------------------------
+[assets]
+logo = "assets/logo.png"    # reservado para uso futuro (logo_enabled) — ainda não composto no vídeo/thumbnail
+intro = "assets/intro.mp4"  # reservado para uso futuro (intro_enabled) — ainda não usado por `render`
+outro = "assets/outro.mp4"  # reservado para uso futuro (outro_enabled) — ainda não usado por `render`
+
+
+# ----------------------------------------------------------------------
+# [video] — configuração usada por `render` (vídeo final).
+#
+# CTA: quando `cta_enabled = true`, exatamente UMA entre `cta_text`,
+# `cta_image` e `cta_video` deve estar preenchida — zero ou mais de uma
+# faz `load_brand()` falhar com um erro claro (BrandConfigError) em vez
+# de escolher uma prioridade silenciosamente. Apague as duas que não for
+# usar (deixar comentadas/vazias já resolve).
+# ----------------------------------------------------------------------
+[video]
+# Opção 1: texto gerado na hora (fundo `colors.background` + `drawtext`,
+# fonte `typography.primary_font`). Aceita quebra de linha manual ("\n"
+# dentro da string) — cada linha é respeitada e ainda pode ser
+# reembrulhada se ficar longa demais para a largura do vídeo.
+cta_text = "NOME DO CANAL\nCurta • Comente • Compartilhe • Inscreva-se"
+
+# Opção 2: imagem estática anexada como último segmento do vídeo, exibida
+# por `editorial_cta_seconds` (config em app/config.py, não neste
+# arquivo). Caminho relativo a este diretório. Escalada com letterbox
+# (preenchida com `colors.background`, nunca cortada) para o tamanho do
+# corte — não precisa de `primary_font` configurada.
+# cta_image = "assets/cta.png"
+
+# Opção 3: vídeo pronto anexado como último segmento — duração é a do
+# próprio arquivo (ignora `editorial_cta_seconds`). Reaproveita o áudio
+# original do arquivo se ele tiver; gera silêncio na duração certa se não
+# tiver. Mesmo letterbox da opção 2; também não precisa de fonte.
+# cta_video = "assets/cta.mp4"
+
+
+# ----------------------------------------------------------------------
+# [thumbnail] — configuração usada por `thumbnail`. `width`/`height`
+# valem para QUALQUER provider (`manual` ou `openai`): depois da imagem
+# gerada, `app/thumbnail_service.py` sempre recorta/redimensiona (FFmpeg,
+# a partir do centro) para bater exatamente com este tamanho, mesmo que o
+# provider só aceite tamanhos fixos diferentes (ex.: `gpt-image-1` só
+# gera 1024x1024/1536x1024/1024x1536, nunca 1280x720 diretamente).
+# ----------------------------------------------------------------------
+[thumbnail]
+width = 1280           # largura final em pixels (default se omitido: 1280)
+height = 720            # altura final em pixels (default se omitido: 720)
+style = "editorial"     # linha de estilo livre, citada no prompt do provider `openai` como direção visual

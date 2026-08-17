@@ -57,6 +57,8 @@ class BrandAssets:
 @dataclass(frozen=True)
 class BrandVideoConfig:
     cta_text: Optional[str] = None
+    cta_image: Optional[Path] = None
+    cta_video: Optional[Path] = None
 
 
 @dataclass(frozen=True)
@@ -117,7 +119,12 @@ def load_brand(slug: str, brands_dir: Path) -> Brand:
         primary_font=_resolve_asset_path(brand_dir, data.get("typography", {}).get("primary_font")),
     )
 
-    video = BrandVideoConfig(**data.get("video", {}))
+    raw_video = data.get("video", {})
+    video = BrandVideoConfig(
+        cta_text=raw_video.get("cta_text"),
+        cta_image=_resolve_asset_path(brand_dir, raw_video.get("cta_image")),
+        cta_video=_resolve_asset_path(brand_dir, raw_video.get("cta_video")),
+    )
     thumbnail = BrandThumbnailConfig(**data.get("thumbnail", {}))
 
     _validate_features(toml_path, features, assets, video)
@@ -158,7 +165,35 @@ def _validate_features(
             f"'{toml_path}': outro_enabled=true mas 'assets.outro' não está configurado "
             f"ou o arquivo não existe ({assets.outro})."
         )
-    if features.cta_enabled and not video.cta_text:
-        raise BrandConfigError(
-            f"'{toml_path}': cta_enabled=true mas 'video.cta_text' não está configurado."
-        )
+    if features.cta_enabled:
+        configured = [
+            name
+            for name, value in (
+                ("video.cta_text", video.cta_text),
+                ("video.cta_image", video.cta_image),
+                ("video.cta_video", video.cta_video),
+            )
+            if value
+        ]
+        if not configured:
+            raise BrandConfigError(
+                f"'{toml_path}': cta_enabled=true mas nenhuma opção de conteúdo do CTA foi "
+                "configurada (defina exatamente uma entre 'video.cta_text', 'video.cta_image' "
+                "ou 'video.cta_video')."
+            )
+        if len(configured) > 1:
+            raise BrandConfigError(
+                f"'{toml_path}': cta_enabled=true mas mais de uma opção de conteúdo do CTA foi "
+                f"configurada ({', '.join(configured)}) — defina exatamente uma entre "
+                "'video.cta_text', 'video.cta_image' ou 'video.cta_video'."
+            )
+        if video.cta_image is not None and not video.cta_image.is_file():
+            raise BrandConfigError(
+                f"'{toml_path}': 'video.cta_image' configurado mas o arquivo não existe "
+                f"({video.cta_image})."
+            )
+        if video.cta_video is not None and not video.cta_video.is_file():
+            raise BrandConfigError(
+                f"'{toml_path}': 'video.cta_video' configurado mas o arquivo não existe "
+                f"({video.cta_video})."
+            )
