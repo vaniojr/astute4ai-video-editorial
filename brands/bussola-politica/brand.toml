@@ -9,6 +9,7 @@ text = "#FFFFFF"
 accent = "#C92020"
 
 [typography]
+primary_font = "assets/fonts/DIN-Condensed-Bold.ttf"
 
 [features]
 logo_enabled = false
@@ -20,7 +21,7 @@ source_attribution_enabled = true
 [assets]
 
 [video]
-cta_text = "BÚSSOLA POLÍTICA\nCurta • Comente • Compartilhe • Inscreva-se"
+cta_image = "assets/cta/Youtube_CTA.png"
 
 [thumbnail]
 width = 1280

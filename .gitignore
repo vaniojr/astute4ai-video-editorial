@@ -12,10 +12,7 @@ __pycache__/
 *.cookies.txt
 
 # Media
-projetos/*/original/*
-projetos/*/audio/*
-projetos/*/cortes/*
-projetos/*/logs/*
+projetos/*
 
 *.mp4
 *.mov
